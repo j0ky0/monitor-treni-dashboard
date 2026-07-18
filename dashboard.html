@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor Treni — Statistiche</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #14171c;
+    --bg-panel: #1c2029;
+    --bg-flap: #0e1015;
+    --rule: #2a2f3a;
+    --amber: #f0b429;
+    --amber-dim: #a8801f;
+    --text: #e8e6df;
+    --text-muted: #7d828c;
+    --red: #e2574c;
+    --green: #4caf7d;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+  header { padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; }
+  .titolo { font-family: var(--font-mono); font-weight: 700; font-size: 1.4rem; letter-spacing: 0.02em; color: var(--amber); display: flex; align-items: baseline; gap: 0.5rem; }
+  .titolo .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .sottotitolo { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem; font-family: var(--font-mono); }
+  .filtri { background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 10px; padding: 1rem; margin-bottom: 1.25rem; }
+  .filtri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .campo { display: flex; flex-direction: column; gap: 0.3rem; }
+  .campo.full { grid-column: 1 / -1; }
+  .campo label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 500; }
+  select, input[type="time"] { background: var(--bg-flap); border: 1px solid var(--rule); color: var(--text); font-family: var(--font-mono); font-size: 0.9rem; padding: 0.5rem 0.6rem; border-radius: 6px; width: 100%; }
+  select:focus, input:focus { outline: 2px solid var(--amber-dim); outline-offset: 1px; }
+  .orario-range { display: flex; gap: 0.5rem; align-items: center; }
+  .orario-range span { color: var(--text-muted); font-size: 0.8rem; }
+  .azioni { display: flex; gap: 0.6rem; margin-top: 1rem; }
+  button { font-family: var(--font-sans); font-weight: 600; font-size: 0.85rem; padding: 0.6rem 1rem; border-radius: 6px; border: none; cursor: pointer; flex: 1; }
+  .btn-cerca { background: var(--amber); color: #1a1400; }
+  .btn-cerca:active { transform: scale(0.98); }
+  .btn-reset { background: transparent; color: var(--text-muted); border: 1px solid var(--rule); }
+  .riepilogo { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem; min-height: 1.2rem; }
+  .board-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 1.5rem; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; background: var(--bg-panel); }
+  th { font-family: var(--font-sans); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--rule); font-weight: 600; white-space: nowrap; }
+  td { padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--rule); font-size: 0.85rem; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  .flap { display: inline-block; font-family: var(--font-mono); font-weight: 700; background: var(--bg-flap); border: 1px solid var(--rule); border-radius: 4px; padding: 0.15rem 0.45rem; min-width: 2.4em; text-align: center; }
+  .flap.rit-neg { color: var(--green); }
+  .flap.rit-zero { color: var(--text-muted); }
+  .flap.rit-pos { color: var(--red); }
+  .num-treno { font-family: var(--font-mono); color: var(--amber); font-weight: 700; }
+  .stazione-cell { color: var(--text); font-size: 0.8rem; }
+  .vuoto, .loading, .errore { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.85rem; }
+  .errore { color: var(--red); }
+  .chart-section { background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 10px; padding: 1rem; }
+  .chart-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 0.75rem; font-weight: 600; }
+  .chart-container { position: relative; height: 280px; }
+  footer { text-align: center; font-size: 0.7rem; color: var(--text-muted); margin-top: 2rem; font-family: var(--font-mono); }
+  @media (max-width: 420px) { .filtri-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="titolo"><span class="dot"></span>MONITOR TRENI</div>
+    <div class="sottotitolo" id="ultimoAggiornamento">Caricamento stato...</div>
+  </header>
+
+  <div class="filtri">
+    <div class="filtri-grid">
+      <div class="campo full">
+        <label for="filtroTreno">Numero treno</label>
+        <select id="filtroTreno"><option value="">Tutti i treni</option></select>
+      </div>
+      <div class="campo full">
+        <label for="filtroStazione">Stazione</label>
+        <select id="filtroStazione"><option value="">Tutte le stazioni</option></select>
+      </div>
+      <div class="campo full">
+        <label>Fascia oraria partenza (opzionale)</label>
+        <div class="orario-range">
+          <input type="time" id="oraInizio">
+          <span>—</span>
+          <input type="time" id="oraFine">
+        </div>
+      </div>
+    </div>
+    <div class="azioni">
+      <button class="btn-reset" onclick="resetFiltri()">Azzera</button>
+      <button class="btn-cerca" onclick="caricaDati()">Applica filtri</button>
+    </div>
+  </div>
+
+  <div class="riepilogo" id="riepilogo"></div>
+
+  <div class="board-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Treno</th><th>Stazione</th><th>Rilev.</th><th>Rit. partenza</th><th>Rit. arrivo</th><th>Min / Max</th>
+        </tr>
+      </thead>
+      <tbody id="tabellaBody">
+        <tr><td colspan="6" class="loading">Caricamento dati...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="chart-section">
+    <p class="chart-title">Ritardo medio in partenza per treno (min. 2 rilevazioni)</p>
+    <div class="chart-container"><canvas id="graficoRitardi"></canvas></div>
+  </div>
+
+  <footer>dati raccolti da ViaggiaTreno · aggiornati automaticamente ogni sera</footer>
+</div>
+
+<script>
+// ================================================================
+// CONFIGURAZIONE — queste due righe sono le UNICHE da controllare
+// ================================================================
+const SUPABASE_URL = "https://ppjmwwnywxesxnqqaryt.supabase.co"; // <-- VERIFICA che sia il tuo Project URL esatto
+const SUPABASE_ANON_KEY = "sb_publishable_ppQxHMlhZmEsKpeHgHUHww_i4cxVSjp"; // <-- gia' inserita
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let chartInstance = null;
+
+async function popolaFiltri() {
+  const { data: treni } = await sb.from('lista_treni').select('numero_treno');
+  const selTreno = document.getElementById('filtroTreno');
+  (treni || []).forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.numero_treno; opt.textContent = r.numero_treno;
+    selTreno.appendChild(opt);
+  });
+  const { data: stazioni } = await sb.from('lista_stazioni').select('nome_stazione_fermata');
+  const selStaz = document.getElementById('filtroStazione');
+  (stazioni || []).forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.nome_stazione_fermata; opt.textContent = r.nome_stazione_fermata;
+    selStaz.appendChild(opt);
+  });
+}
+
+async function mostraUltimoAggiornamento() {
+  const { data } = await sb.from('ultimo_aggiornamento').select('*').single();
+  const el = document.getElementById('ultimoAggiornamento');
+  el.textContent = (data && data.ultima_data) ? `ultimo aggiornamento: ${data.ultima_data}` : 'nessun dato disponibile';
+}
+
+function formattaRitardo(valore) {
+  if (valore === null || valore === undefined) return '<span class="flap rit-zero">—</span>';
+  const cls = valore > 0 ? 'rit-pos' : valore < 0 ? 'rit-neg' : 'rit-zero';
+  const segno = valore > 0 ? '+' : '';
+  return `<span class="flap ${cls}">${segno}${valore}'</span>`;
+}
+
+function leggiFiltri() {
+  return {
+    p_numero_treno: document.getElementById('filtroTreno').value || null,
+    p_stazione: document.getElementById('filtroStazione').value || null,
+    p_ora_inizio: document.getElementById('oraInizio').value || null,
+    p_ora_fine: document.getElementById('oraFine').value || null
+  };
+}
+
+function resetFiltri() {
+  document.getElementById('filtroTreno').value = '';
+  document.getElementById('filtroStazione').value = '';
+  document.getElementById('oraInizio').value = '';
+  document.getElementById('oraFine').value = '';
+  caricaDati();
+}
+
+async function caricaDati() {
+  const tbody = document.getElementById('tabellaBody');
+  const riepilogo = document.getElementById('riepilogo');
+  tbody.innerHTML = '<tr><td colspan="6" class="loading">Caricamento dati...</td></tr>';
+  riepilogo.textContent = '';
+
+  const { data, error } = await sb.rpc('dashboard_stats', leggiFiltri());
+
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="6" class="errore">Errore: ${error.message}</td></tr>`;
+    return;
+  }
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="vuoto">Nessun risultato con questi filtri</td></tr>';
+    if (chartInstance) chartInstance.destroy();
+    return;
+  }
+  riepilogo.textContent = `${data.length} combinazioni treno/stazione trovate`;
+  tbody.innerHTML = data.map(r => `
+    <tr>
+      <td class="num-treno">${r.numero_treno}</td>
+      <td class="stazione-cell">${r.nome_stazione_fermata}</td>
+      <td>${r.num_rilevazioni}</td>
+      <td>${formattaRitardo(r.ritardo_medio_partenza)}</td>
+      <td>${formattaRitardo(r.ritardo_medio_arrivo)}</td>
+      <td style="color:var(--text-muted); font-family:var(--font-mono); font-size:0.78rem;">${r.ritardo_minimo ?? '—'} / ${r.ritardo_massimo ?? '—'}</td>
+    </tr>`).join('');
+  disegnaGrafico(data);
+}
+
+function disegnaGrafico(data) {
+  const filtrati = data.filter(r => r.num_rilevazioni >= 2 && r.ritardo_medio_partenza !== null)
+    .sort((a, b) => b.ritardo_medio_partenza - a.ritardo_medio_partenza).slice(0, 15);
+  const ctx = document.getElementById('graficoRitardi');
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: filtrati.map(r => `${r.numero_treno}`),
+      datasets: [{
+        data: filtrati.map(r => r.ritardo_medio_partenza),
+        backgroundColor: filtrati.map(r => r.ritardo_medio_partenza > 3 ? '#e2574c' : r.ritardo_medio_partenza > 0 ? '#f0b429' : '#4caf7d'),
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#7d828c', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#2a2f3a' }, title: { display: true, text: 'minuti', color: '#7d828c', font: { size: 10 } } },
+        y: { ticks: { color: '#e8e6df', font: { family: 'JetBrains Mono', size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+(async function init() {
+  await popolaFiltri();
+  await mostraUltimoAggiornamento();
+  await caricaDati();
+})();
+</script>
+</body>
+</html>
