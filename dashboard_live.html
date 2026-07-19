@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor Live — Pendolare</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #14171c;
+    --bg-panel: #1c2029;
+    --bg-flap: #0e1015;
+    --rule: #2a2f3a;
+    --amber: #f0b429;
+    --amber-dim: #a8801f;
+    --text: #e8e6df;
+    --text-muted: #7d828c;
+    --red: #e2574c;
+    --green: #4caf7d;
+    --blue: #4a90d9;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+  header { padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; }
+  .titolo { font-family: var(--font-mono); font-weight: 700; font-size: 1.3rem; letter-spacing: 0.02em; color: var(--amber); display: flex; align-items: baseline; gap: 0.5rem; }
+  .titolo .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .ora-sub { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; font-family: var(--font-mono); }
+  .btn-refresh { background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 0.5rem 0.8rem; font-size: 0.8rem; color: var(--text-muted); cursor: pointer; font-family: var(--font-sans); }
+  .btn-refresh:active { background: var(--bg-panel); }
+
+  .section-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 1.5rem 0 0.6rem; display: flex; align-items: center; gap: 6px; }
+
+  .bus-card { background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; padding: 0.9rem 1rem; margin-bottom: 8px; }
+  .bus-card.urgente { border-color: var(--red); }
+  .bus-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .bus-linea { display: flex; align-items: center; gap: 8px; }
+  .badge-linea { background: var(--bg-flap); border: 1px solid var(--rule); color: var(--amber); font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; padding: 3px 9px; border-radius: 6px; }
+  .bus-direzione { font-size: 0.78rem; color: var(--text-muted); }
+  .bus-attesa { text-align: right; }
+  .bus-attesa-val { font-family: var(--font-mono); font-weight: 700; font-size: 1.3rem; }
+  .bus-attesa-val.ok { color: var(--green); }
+  .bus-attesa-val.presto { color: var(--amber); }
+  .bus-attesa-val.urgente { color: var(--red); }
+  .bus-attesa-sub { font-size: 0.68rem; color: var(--text-muted); }
+  .bus-dettagli { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); font-size: 0.75rem; color: var(--text-muted); }
+  .bus-dettagli b { color: var(--text); font-family: var(--font-mono); }
+  .rit-neg { color: var(--green); }
+  .rit-pos { color: var(--red); }
+  .rit-zero { color: var(--text-muted); }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { font-size: 0.75rem; padding: 5px 11px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; white-space: nowrap; flex-shrink: 0; font-family: var(--font-sans); }
+  .tab.on { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); }
+
+  .rfi-frame-wrap { border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: #fff; }
+  .rfi-frame-wrap iframe { width: 100%; height: 480px; border: none; display: block; }
+  .rfi-fallback { padding: 2rem 1rem; text-align: center; font-size: 0.8rem; color: var(--text-muted); }
+  .rfi-fallback a { color: var(--amber); }
+  .rfi-link-esterno { display: block; text-align: center; font-size: 0.72rem; color: var(--text-muted); padding: 6px 0; }
+  .rfi-link-esterno a { color: var(--text-muted); }
+
+  .loading, .vuoto, .errore { text-align: center; padding: 1.5rem 1rem; color: var(--text-muted); font-size: 0.82rem; }
+  .errore { color: var(--red); }
+
+  footer { text-align: center; font-size: 0.68rem; color: var(--text-muted); margin-top: 2rem; font-family: var(--font-mono); line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="titolo"><span class="dot"></span>MONITOR LIVE</div>
+      <div class="ora-sub" id="oraEl">--:--</div>
+    </div>
+    <button class="btn-refresh" onclick="aggiornaTutto()">↻ Aggiorna</button>
+  </header>
+
+  <div class="section-label">🚌 Bus in tempo reale</div>
+  <div id="busEl"><div class="loading">Caricamento...</div></div>
+
+  <div class="section-label">🚆 Treni — tabellone RFI</div>
+  <div class="tabs" id="stazioniTabs"></div>
+  <div class="rfi-frame-wrap">
+    <iframe id="rfiFrame" title="Tabellone RFI" loading="lazy"></iframe>
+  </div>
+  <div class="rfi-link-esterno" id="rfiLinkEsterno"></div>
+
+  <footer>
+    Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
+    Treni: tabellone ufficiale RFI · aggiornamento automatico
+  </footer>
+
+</div>
+
+<script>
+// ================================================================
+// CONFIGURAZIONE
+// ================================================================
+const WORKER_URL = 'https://fragrant-shape-56bd.zargonabio.workers.dev';
+
+const COPPIE_LINEE = [
+  { linea: '490', partenza: '74299', arrivo: '82007', destinazione: 'Roma Tiburtina' },
+  { linea: '495', partenza: '74299', arrivo: '82005', destinazione: 'Roma Tiburtina' },
+  { linea: '80',  partenza: '72661', arrivo: '72685', destinazione: 'Libia (M1)' },
+  { linea: '38',  partenza: '72661', arrivo: '72685', destinazione: 'Libia (M1)' },
+  { linea: '83',  partenza: '84300', arrivo: '72685', destinazione: 'Libia (M1)' },
+];
+
+const STAZIONI_RFI = [
+  { nome: 'Termini',    placeId: 2416 },
+  { nome: 'Tiburtina',  placeId: 2385 },
+  { nome: 'Nomentana',  placeId: 3411 },
+  { nome: 'Ostiense',   placeId: 2379 },
+  { nome: 'Orte',       placeId: 1959 },
+  { nome: 'Fiumicino',  placeId: 1327 },
+];
+
+let stazioneAttiva = STAZIONI_RFI[1]; // Tiburtina di default
+
+// ================================================================
+// OROLOGIO
+// ================================================================
+function aggiornaOra() {
+  const now = new Date();
+  const gg = ['dom','lun','mar','mer','gio','ven','sab'];
+  const mm = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  document.getElementById('oraEl').textContent =
+    `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} · ${gg[now.getDay()]} ${now.getDate()} ${mm[now.getMonth()]}`;
+}
+
+// ================================================================
+// BUS — chiamata al Worker Cloudflare
+// ================================================================
+function fmtMin(min) {
+  if (min < 1) return 'ora';
+  if (min < 60) return `${Math.round(min)}'`;
+  return `${Math.floor(min/60)}h${String(Math.round(min%60)).padStart(2,'0')}`;
+}
+
+async function caricaBus() {
+  const el = document.getElementById('busEl');
+  el.innerHTML = '<div class="loading">Caricamento bus...</div>';
+
+  try {
+    const risposta = await fetch(`${WORKER_URL}/trip-updates`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
+      return;
+    }
+
+    const ora = Date.now() / 1000;
+    const corse = [];
+
+    for (const trip of json.dati) {
+      const coppia = COPPIE_LINEE.find(c => c.linea === trip.routeId);
+      if (!coppia) continue;
+
+      const stopPartenza = trip.stopTimeUpdates.find(s => s.stopId === coppia.partenza);
+      const stopArrivo = trip.stopTimeUpdates.find(s => s.stopId === coppia.arrivo);
+      if (!stopPartenza) continue;
+
+      const minutiAttesa = (stopPartenza.arrivalTime - ora) / 60;
+      if (minutiAttesa < -2 || minutiAttesa > 45) continue; // fuori range utile
+
+      corse.push({
+        linea: trip.routeId,
+        destinazione: coppia.destinazione,
+        minutiAttesa,
+        ritardoPartenza: stopPartenza.arrivalDelay,
+        orarioPartenza: stopPartenza.arrivalTime,
+        orarioArrivoDestinazione: stopArrivo ? stopArrivo.arrivalTime : null,
+        ritardoArrivo: stopArrivo ? stopArrivo.arrivalDelay : null,
+      });
+    }
+
+    corse.sort((a, b) => a.minutiAttesa - b.minutiAttesa);
+
+    if (corse.length === 0) {
+      el.innerHTML = '<div class="vuoto">Nessun bus in arrivo nei prossimi 45 minuti</div>';
+      return;
+    }
+
+    el.innerHTML = corse.slice(0, 6).map(c => {
+      const urgenteClass = c.minutiAttesa < 5 ? 'urgente' : '';
+      const attesaClass = c.minutiAttesa < 5 ? 'urgente' : c.minutiAttesa < 12 ? 'presto' : 'ok';
+      const ritPartClass = c.ritardoPartenza > 60 ? 'rit-pos' : c.ritardoPartenza < -60 ? 'rit-neg' : 'rit-zero';
+      const ritPartTxt = c.ritardoPartenza != null ? `${c.ritardoPartenza > 0 ? '+' : ''}${(c.ritardoPartenza/60).toFixed(1)}'` : '—';
+
+      let durataTxt = '—';
+      let ritArrTxt = '—';
+      let ritArrClass = 'rit-zero';
+      if (c.orarioArrivoDestinazione) {
+        const durataMin = (c.orarioArrivoDestinazione - c.orarioPartenza) / 60;
+        durataTxt = `${Math.round(durataMin)}'`;
+        ritArrClass = c.ritardoArrivo > 60 ? 'rit-pos' : c.ritardoArrivo < -60 ? 'rit-neg' : 'rit-zero';
+        ritArrTxt = `${c.ritardoArrivo > 0 ? '+' : ''}${(c.ritardoArrivo/60).toFixed(1)}'`;
+      }
+
+      return `
+        <div class="bus-card ${urgenteClass}">
+          <div class="bus-top">
+            <div class="bus-linea">
+              <span class="badge-linea">${c.linea}</span>
+              <span class="bus-direzione">→ ${c.destinazione}</span>
+            </div>
+            <div class="bus-attesa">
+              <div class="bus-attesa-val ${attesaClass}">${fmtMin(c.minutiAttesa)}</div>
+              <div class="bus-attesa-sub">alla fermata</div>
+            </div>
+          </div>
+          <div class="bus-dettagli">
+            <span>Ritardo: <b class="${ritPartClass}">${ritPartTxt}</b></span>
+            <span>Durata tragitto: <b>${durataTxt}</b></span>
+            <span>Ritardo arrivo: <b class="${ritArrClass}">${ritArrTxt}</b></span>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+// ================================================================
+// TRENI — tabellone RFI in iframe
+// ================================================================
+function renderTabsStazioni() {
+  const tabsEl = document.getElementById('stazioniTabs');
+  tabsEl.innerHTML = STAZIONI_RFI.map(s =>
+    `<button class="tab${s.placeId === stazioneAttiva.placeId ? ' on' : ''}" onclick="selStazione(${s.placeId})">${s.nome}</button>`
+  ).join('');
+}
+
+function caricaRfi() {
+  const url = `https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Monitor?placeId=${stazioneAttiva.placeId}&arrivals=False`;
+  document.getElementById('rfiFrame').src = url;
+  document.getElementById('rfiLinkEsterno').innerHTML =
+    `<a href="${url}" target="_blank" rel="noopener">Se il tabellone non si vede, aprilo in una nuova scheda ↗</a>`;
+}
+
+function selStazione(placeId) {
+  stazioneAttiva = STAZIONI_RFI.find(s => s.placeId === placeId);
+  renderTabsStazioni();
+  caricaRfi();
+}
+
+// ================================================================
+// AVVIO
+// ================================================================
+function aggiornaTutto() {
+  aggiornaOra();
+  caricaBus();
+  caricaRfi();
+}
+
+aggiornaOra();
+renderTabsStazioni();
+caricaBus();
+caricaRfi();
+setInterval(aggiornaOra, 30000);
+</script>
+</body>
+</html>
