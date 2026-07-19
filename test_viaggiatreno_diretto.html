@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Test accesso diretto ViaggiaTreno dal browser</title>
+<style>
+  body { font-family: monospace; background: #14171c; color: #e8e6df; padding: 1.5rem; line-height: 1.6; }
+  h1 { color: #f0b429; font-size: 1.1rem; }
+  .test { background: #1c2029; border: 1px solid #2a2f3a; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  .ok { color: #4caf7d; }
+  .errore { color: #e2574c; }
+  .attesa { color: #7d828c; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; background: #0e1015; padding: 0.75rem; border-radius: 6px; max-height: 300px; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<h1>TEST: chiamata diretta dal browser a ViaggiaTreno (senza proxy)</h1>
+
+<div class="test">
+  <div id="stato1" class="attesa">In corso: autocomplete treno 4523 ...</div>
+  <pre id="dettaglio1"></pre>
+</div>
+
+<script>
+async function test() {
+  const url = 'http://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno/cercaNumeroTrenoTrenoAutocomplete/4523';
+  const stato = document.getElementById('stato1');
+  const dettaglio = document.getElementById('dettaglio1');
+
+  try {
+    const risposta = await fetch(url);
+    if (!risposta.ok) {
+      stato.className = 'errore';
+      stato.textContent = `ERRORE: risposta HTTP ${risposta.status}`;
+      return;
+    }
+    const testo = await risposta.text();
+    stato.className = 'ok';
+    stato.textContent = `OK — risposta ricevuta (${testo.length} caratteri)`;
+    dettaglio.textContent = testo;
+  } catch (errore) {
+    stato.className = 'errore';
+    stato.textContent = `ERRORE (probabile blocco CORS o rete): ${errore.message}`;
+    dettaglio.textContent = 'Se vedi "Failed to fetch", il browser ha bloccato la richiesta (CORS) o non ha raggiunto il server.';
+  }
+}
+test();
+</script>
+
+</body>
+</html>
