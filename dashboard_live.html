@@ -58,11 +58,23 @@
   .tab { font-size: 0.75rem; padding: 5px 11px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; white-space: nowrap; flex-shrink: 0; font-family: var(--font-sans); }
   .tab.on { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); }
 
-  .rfi-frame-wrap { border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: #fff; }
-  .rfi-frame-wrap iframe { width: 100%; height: 480px; border: none; display: block; }
-  .rfi-fallback { padding: 2rem 1rem; text-align: center; font-size: 0.8rem; color: var(--text-muted); }
-  .rfi-fallback a { color: var(--amber); }
-  .rfi-link-esterno { display: block; text-align: center; font-size: 0.72rem; color: var(--text-muted); padding: 6px 0; }
+  .toggle-pa { display: flex; gap: 6px; margin-bottom: 10px; }
+  .toggle-pa button { flex: 1; font-size: 0.78rem; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font-family: var(--font-sans); }
+  .toggle-pa button.on { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); font-weight: 600; }
+
+  .treno-list-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+  .treno-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--rule); gap: 8px; }
+  .treno-row:last-child { border-bottom: none; }
+  .treno-sx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .treno-num-riga { display: flex; align-items: baseline; gap: 6px; }
+  .treno-num { font-family: var(--font-mono); color: var(--amber); font-weight: 700; font-size: 0.85rem; }
+  .treno-cat { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; }
+  .treno-dest { font-size: 0.78rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .treno-dx { text-align: right; flex-shrink: 0; }
+  .treno-orario { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text); }
+  .treno-bin { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
+
+  .rfi-link-esterno { display: block; text-align: center; font-size: 0.72rem; color: var(--text-muted); padding: 10px 0 4px; }
   .rfi-link-esterno a { color: var(--text-muted); }
 
   .loading, .vuoto, .errore { text-align: center; padding: 1.5rem 1rem; color: var(--text-muted); font-size: 0.82rem; }
@@ -85,16 +97,20 @@
   <div class="section-label">🚌 Bus in tempo reale</div>
   <div id="busEl"><div class="loading">Caricamento...</div></div>
 
-  <div class="section-label">🚆 Treni — tabellone RFI</div>
+  <div class="section-label">🚆 Treni — tabellone ViaggiaTreno</div>
   <div class="tabs" id="stazioniTabs"></div>
-  <div class="rfi-frame-wrap">
-    <iframe id="rfiFrame" title="Tabellone RFI" loading="lazy"></iframe>
+  <div class="toggle-pa" id="togglePA">
+    <button id="btnPartenze" onclick="selModalita('partenze')">Partenze</button>
+    <button id="btnArrivi" onclick="selModalita('arrivi')">Arrivi</button>
+  </div>
+  <div class="treno-list-wrap">
+    <div id="treniEl"><div class="loading">Caricamento...</div></div>
   </div>
   <div class="rfi-link-esterno" id="rfiLinkEsterno"></div>
 
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
-    Treni: tabellone ufficiale RFI · aggiornamento automatico
+    Treni: dati ViaggiaTreno (via proxy Deno) · aggiornamento automatico
   </footer>
 
 </div>
@@ -104,6 +120,7 @@
 // CONFIGURAZIONE
 // ================================================================
 const WORKER_URL = 'https://fragrant-shape-56bd.zargonabio.workers.dev';
+const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
 const COPPIE_LINEE = [
   { linea: '490', partenza: '74299', arrivo: '82007', destinazione: 'Roma Tiburtina' },
@@ -113,16 +130,21 @@ const COPPIE_LINEE = [
   { linea: '83',  partenza: '84300', arrivo: '72685', destinazione: 'Libia (M1)' },
 ];
 
-const STAZIONI_RFI = [
-  { nome: 'Termini',    placeId: 2416 },
-  { nome: 'Tiburtina',  placeId: 2385 },
-  { nome: 'Nomentana',  placeId: 3411 },
-  { nome: 'Ostiense',   placeId: 2379 },
-  { nome: 'Orte',       placeId: 1959 },
-  { nome: 'Fiumicino',  placeId: 1327 },
+// Stazioni prioritarie a portata di mano (tab in alto). Ognuna porta sia
+// il placeId RFI (per il link di fallback) sia il codice ViaggiaTreno
+// (per il tabellone via Deno). In futuro qui si innesta la ricerca
+// stazione "on demand" con stazioni_master.json.
+const STAZIONI_TRENI = [
+  { nome: 'Termini',   placeId: 2416, codViaggiaTreno: 'S08409' },
+  { nome: 'Tiburtina', placeId: 2385, codViaggiaTreno: 'S08217' },
+  { nome: 'Nomentana', placeId: 3411, codViaggiaTreno: 'S08236' },
+  { nome: 'Ostiense',  placeId: 2379, codViaggiaTreno: 'S08406' },
+  { nome: 'Orte',      placeId: 1959, codViaggiaTreno: 'S08209' },
+  { nome: 'Fiumicino', placeId: 1327, codViaggiaTreno: 'S08411' },
 ];
 
-let stazioneAttiva = STAZIONI_RFI[1]; // Tiburtina di default
+let stazioneAttiva = STAZIONI_TRENI[1]; // Tiburtina di default
+let modalitaAttiva = 'partenze'; // default: partenze
 
 // ================================================================
 // OROLOGIO
@@ -231,26 +253,94 @@ async function caricaBus() {
 }
 
 // ================================================================
-// TRENI — tabellone RFI in iframe
+// TRENI — tabellone via Deno (ViaggiaTreno)
 // ================================================================
 function renderTabsStazioni() {
   const tabsEl = document.getElementById('stazioniTabs');
-  tabsEl.innerHTML = STAZIONI_RFI.map(s =>
-    `<button class="tab${s.placeId === stazioneAttiva.placeId ? ' on' : ''}" onclick="selStazione(${s.placeId})">${s.nome}</button>`
+  tabsEl.innerHTML = STAZIONI_TRENI.map(s =>
+    `<button class="tab${s.codViaggiaTreno === stazioneAttiva.codViaggiaTreno ? ' on' : ''}" onclick="selStazione('${s.codViaggiaTreno}')">${s.nome}</button>`
   ).join('');
 }
 
-function caricaRfi() {
-  const url = `https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Monitor?placeId=${stazioneAttiva.placeId}&arrivals=False`;
-  document.getElementById('rfiFrame').src = url;
-  document.getElementById('rfiLinkEsterno').innerHTML =
-    `<a href="${url}" target="_blank" rel="noopener">Se il tabellone non si vede, aprilo in una nuova scheda ↗</a>`;
+function renderTogglePA() {
+  document.getElementById('btnPartenze').classList.toggle('on', modalitaAttiva === 'partenze');
+  document.getElementById('btnArrivi').classList.toggle('on', modalitaAttiva === 'arrivi');
 }
 
-function selStazione(placeId) {
-  stazioneAttiva = STAZIONI_RFI.find(s => s.placeId === placeId);
+function formattaRitardoTreno(min) {
+  if (min === null || min === undefined) return '<span class="rit-zero">—</span>';
+  const cls = min > 0 ? 'rit-pos' : min < 0 ? 'rit-neg' : 'rit-zero';
+  const segno = min > 0 ? '+' : '';
+  return `<span class="${cls}">${segno}${min}'</span>`;
+}
+
+async function caricaTreni() {
+  const el = document.getElementById('treniEl');
+  el.innerHTML = '<div class="loading">Caricamento tabellone...</div>';
+
+  try {
+    const risposta = await fetch(`${DENO_URL}/tabellone/${stazioneAttiva.codViaggiaTreno}`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
+      return;
+    }
+
+    const lista = (modalitaAttiva === 'partenze' ? json.partenze : json.arrivi) || [];
+
+    // Filtro: solo i prossimi ~60' + ultima ora, escludiamo il "passato oltre ora"
+    const filtrata = lista
+      .filter(t => t.stato !== 'passato_oltre_ora')
+      .sort((a, b) => (a.orarioProgrammato || '').localeCompare(b.orarioProgrammato || ''));
+
+    if (filtrata.length === 0) {
+      el.innerHTML = '<div class="vuoto">Nessun treno nella finestra attuale</div>';
+      return;
+    }
+
+    el.innerHTML = filtrata.map(t => {
+      const destOrig = modalitaAttiva === 'partenze' ? t.destinazione : t.origine;
+      const binario = t.binarioEffettivo || t.binarioProgrammato || '—';
+      return `
+        <div class="treno-row">
+          <div class="treno-sx">
+            <div class="treno-num-riga">
+              <span class="treno-num">${t.numeroTreno}</span>
+              <span class="treno-cat">${t.categoria || ''}</span>
+            </div>
+            <div class="treno-dest">${destOrig || '—'}</div>
+          </div>
+          <div class="treno-dx">
+            <div class="treno-orario">${t.orarioProgrammato || '—'} ${formattaRitardoTreno(t.ritardo)}</div>
+            <div class="treno-bin">bin. ${binario}</div>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+function aggiornaLinkRfi() {
+  const url = `https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Monitor?placeId=${stazioneAttiva.placeId}&arrivals=${modalitaAttiva === 'arrivi'}`;
+  document.getElementById('rfiLinkEsterno').innerHTML =
+    `<a href="${url}" target="_blank" rel="noopener">Apri il tabellone ufficiale RFI ↗</a>`;
+}
+
+function selStazione(codViaggiaTreno) {
+  stazioneAttiva = STAZIONI_TRENI.find(s => s.codViaggiaTreno === codViaggiaTreno);
   renderTabsStazioni();
-  caricaRfi();
+  aggiornaLinkRfi();
+  caricaTreni();
+}
+
+function selModalita(modalita) {
+  modalitaAttiva = modalita;
+  renderTogglePA();
+  aggiornaLinkRfi();
+  caricaTreni();
 }
 
 // ================================================================
@@ -259,13 +349,15 @@ function selStazione(placeId) {
 function aggiornaTutto() {
   aggiornaOra();
   caricaBus();
-  caricaRfi();
+  caricaTreni();
 }
 
 aggiornaOra();
 renderTabsStazioni();
+renderTogglePA();
+aggiornaLinkRfi();
 caricaBus();
-caricaRfi();
+caricaTreni();
 setInterval(aggiornaOra, 30000);
 </script>
 </body>
