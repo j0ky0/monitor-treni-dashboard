@@ -35,23 +35,35 @@
 
   .section-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 1.5rem 0 0.6rem; display: flex; align-items: center; gap: 6px; }
 
+  /* --- Filtro doppio Bus: riga Andata/Ritorno + riga DD/LL --- */
+  .bus-filtri { margin-bottom: 12px; }
+  .bus-filtri .riga-filtro { display: flex; gap: 6px; margin-bottom: 6px; }
+  .bus-filtri .riga-filtro:last-child { margin-bottom: 0; }
+  .bus-filtri button { flex: 1; font-size: 0.78rem; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font-family: var(--font-sans); font-weight: 500; }
+  .bus-filtri button.on { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); }
+  .bus-filtri .riga-sub button { font-size: 0.72rem; padding: 6px 10px; }
+
   .bus-card { background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; padding: 0.9rem 1rem; margin-bottom: 8px; }
   .bus-card.urgente { border-color: var(--red); }
   .bus-top { display: flex; justify-content: space-between; align-items: flex-start; }
-  .bus-linea { display: flex; align-items: center; gap: 8px; }
-  .badge-linea { background: var(--bg-flap); border: 1px solid var(--rule); color: var(--amber); font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; padding: 3px 9px; border-radius: 6px; }
-  .bus-direzione { font-size: 0.78rem; color: var(--text-muted); }
-  .bus-attesa { text-align: right; }
+  .bus-linea { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .badge-linea { background: var(--bg-flap); border: 1px solid var(--rule); color: var(--amber); font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; padding: 3px 9px; border-radius: 6px; flex-shrink: 0; }
+  .bus-direzione { font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bus-attesa { text-align: right; flex-shrink: 0; }
   .bus-attesa-val { font-family: var(--font-mono); font-weight: 700; font-size: 1.3rem; }
   .bus-attesa-val.ok { color: var(--green); }
   .bus-attesa-val.presto { color: var(--amber); }
   .bus-attesa-val.urgente { color: var(--red); }
   .bus-attesa-sub { font-size: 0.68rem; color: var(--text-muted); }
-  .bus-dettagli { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); font-size: 0.75rem; color: var(--text-muted); }
-  .bus-dettagli b { color: var(--text); font-family: var(--font-mono); }
+
+  .bus-orari { display: flex; flex-direction: column; gap: 3px; font-size: 0.74rem; color: var(--text-muted); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); }
+  .bus-orari b { color: var(--text); font-family: var(--font-mono); font-weight: 600; }
   .rit-neg { color: var(--green); }
   .rit-pos { color: var(--red); }
   .rit-zero { color: var(--text-muted); }
+
+  .bus-vettura { font-size: 0.7rem; color: var(--text-muted); margin-top: 6px; }
+  .bus-vettura b { color: var(--text); font-family: var(--font-mono); }
 
   .tabs { display: flex; gap: 6px; margin-bottom: 8px; overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
@@ -95,6 +107,16 @@
   </header>
 
   <div class="section-label">🚌 Bus in tempo reale</div>
+  <div class="bus-filtri">
+    <div class="riga-filtro">
+      <button id="btnBusAndata" onclick="selDirezione('andata')">Andata</button>
+      <button id="btnBusRitorno" onclick="selDirezione('ritorno')">Ritorno</button>
+    </div>
+    <div class="riga-filtro riga-sub">
+      <button id="btnBusDD" onclick="selGruppo('DD')">DD</button>
+      <button id="btnBusLL" onclick="selGruppo('LL')">LL</button>
+    </div>
+  </div>
   <div id="busEl"><div class="loading">Caricamento...</div></div>
 
   <div class="section-label">🚆 Treni — tabellone ViaggiaTreno</div>
@@ -122,18 +144,81 @@
 const WORKER_URL = 'https://fragrant-shape-56bd.zargonabio.workers.dev';
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
-const COPPIE_LINEE = [
-  { linea: '490', partenza: '74299', arrivo: '82007', destinazione: 'Roma Tiburtina' },
-  { linea: '495', partenza: '74299', arrivo: '82005', destinazione: 'Roma Tiburtina' },
-  { linea: '80',  partenza: '72661', arrivo: '72685', destinazione: 'Libia (M1)' },
-  { linea: '38',  partenza: '72661', arrivo: '72685', destinazione: 'Libia (M1)' },
-  { linea: '83',  partenza: '84300', arrivo: '72685', destinazione: 'Libia (M1)' },
+// ----------------------------------------------------------------
+// TRATTE BUS: una riga per ogni combinazione linea+direzione+fermate
+// (dal foglio tratte_bus.xlsx). Una stessa linea puo' comparire piu'
+// volte con fermate diverse (es. 38 ha 2 tratte andata + 2 ritorno).
+// gruppi: array con 'LL' e/o 'DD' — se in futuro aggiungi una linea
+// senza compilare questi tag, la logica sotto la mette automaticamente
+// in ENTRAMBI i gruppi (fail-open, cosi' non sparisce per errore).
+// ----------------------------------------------------------------
+const TRATTE_BUS_RAW = [
+  { linea: '490', direzione: 'ritorno', partenza: '74299', nomePartenza: "C.so d'Italia/P.za Fiume", arrivo: '82007', nomeArrivo: 'Staz.ne Tiburtina (MB)', ll: true,  dd: true  },
+  { linea: '495', direzione: 'ritorno', partenza: '74299', nomePartenza: "C.so d'Italia/P.za Fiume", arrivo: '82005', nomeArrivo: 'Staz.ne Tiburtina (MB)', ll: true,  dd: true  },
+  { linea: '80',  direzione: 'ritorno', partenza: '72661', nomePartenza: 'Fiume',                     arrivo: '72685', nomeArrivo: 'Libia (MB1)',              ll: true,  dd: false },
+  { linea: '38',  direzione: 'ritorno', partenza: '72661', nomePartenza: 'Fiume',                     arrivo: '72685', nomeArrivo: 'Libia (MB1)',              ll: true,  dd: false },
+  { linea: '83',  direzione: 'ritorno', partenza: '84300', nomePartenza: "Po/C.so d'Italia",          arrivo: '72685', nomeArrivo: 'Libia (MB1)',              ll: true,  dd: false },
+  { linea: '490', direzione: 'andata',  partenza: '82007', nomePartenza: 'Staz.ne Tiburtina (MB)',    arrivo: '74308', nomeArrivo: 'Fiume',                    ll: true,  dd: true  },
+  { linea: '495', direzione: 'andata',  partenza: '82005', nomePartenza: 'Staz.ne Tiburtina (MB)',    arrivo: '74308', nomeArrivo: 'Fiume',                    ll: true,  dd: true  },
+  { linea: '83',  direzione: 'andata',  partenza: '81874', nomePartenza: 'Libia (MB1)',               arrivo: '84299', nomeArrivo: "Po/C.so d'Italia",         ll: true,  dd: false },
+  { linea: '80',  direzione: 'andata',  partenza: '81874', nomePartenza: 'Libia (MB1)',               arrivo: '76852', nomeArrivo: 'Viterbo',                  ll: true,  dd: false },
+  { linea: '38',  direzione: 'andata',  partenza: '81874', nomePartenza: 'Libia (MB1)',               arrivo: '76852', nomeArrivo: 'Viterbo',                  ll: true,  dd: false, nota: 'tratta 1' },
+  { linea: '38',  direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '72661', nomeArrivo: 'Fiume',                    ll: false, dd: true,  nota: 'tratta 2' },
+  { linea: '38',  direzione: 'ritorno', partenza: '76852', nomePartenza: 'Viterbo',                   arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true,  nota: 'tratta 3' },
+  { linea: '62',  direzione: 'andata',  partenza: '83173', nomePartenza: 'Staz.ne Tiburtina (MB)',    arrivo: '71555', nomeArrivo: 'Porta Pia',                ll: true,  dd: true  },
+  { linea: '92',  direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '73624', nomeArrivo: 'Fiume',                    ll: false, dd: true  },
+  { linea: '92',  direzione: 'ritorno', partenza: '70237', nomePartenza: 'Salaria/Aniene',            arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true  },
+  { linea: '360', direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '70446', nomeArrivo: 'Fiume',                    ll: false, dd: true  },
+  { linea: '360', direzione: 'ritorno', partenza: '70237', nomePartenza: 'Salaria/Aniene',            arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true  },
+  { linea: '223', direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '70446', nomeArrivo: 'Fiume',                    ll: false, dd: true  },
+  { linea: '223', direzione: 'ritorno', partenza: '70237', nomePartenza: 'Salaria/Aniene',            arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true  },
 ];
 
-// Stazioni prioritarie a portata di mano (tab in alto). Ognuna porta sia
-// il placeId RFI (per il link di fallback) sia il codice ViaggiaTreno
-// (per il tabellone via Deno). In futuro qui si innesta la ricerca
-// stazione "on demand" con stazioni_master.json.
+const TRATTE_BUS = TRATTE_BUS_RAW.map((t, i) => {
+  const gruppi = [];
+  if (t.ll) gruppi.push('LL');
+  if (t.dd) gruppi.push('DD');
+  if (gruppi.length === 0) { gruppi.push('LL', 'DD'); } // fail-open
+  return { id: `${t.linea}-${t.direzione}-${i}`, ...t, gruppi };
+});
+
+// Stato filtro doppio: Direzione (sempre uno attivo) + Gruppo
+// (LL/DD con default smart, secondo tap sullo stesso bottone = "tutti")
+let direzioneAttiva = 'ritorno';
+let gruppoAttivo = 'LL'; // default per Ritorno
+
+function defaultGruppoPer(direzione) {
+  return direzione === 'andata' ? 'DD' : 'LL';
+}
+
+function selDirezione(direzione) {
+  direzioneAttiva = direzione;
+  gruppoAttivo = defaultGruppoPer(direzione); // reset a default smart
+  renderFiltriBus();
+  caricaBus();
+}
+
+function selGruppo(gruppo) {
+  gruppoAttivo = (gruppoAttivo === gruppo) ? null : gruppo; // secondo tap = allarga
+  renderFiltriBus();
+  caricaBus();
+}
+
+function renderFiltriBus() {
+  document.getElementById('btnBusAndata').classList.toggle('on', direzioneAttiva === 'andata');
+  document.getElementById('btnBusRitorno').classList.toggle('on', direzioneAttiva === 'ritorno');
+  document.getElementById('btnBusDD').classList.toggle('on', gruppoAttivo === 'DD');
+  document.getElementById('btnBusLL').classList.toggle('on', gruppoAttivo === 'LL');
+}
+
+function tratteFiltrate() {
+  return TRATTE_BUS.filter(t =>
+    t.direzione === direzioneAttiva &&
+    (gruppoAttivo === null || t.gruppi.includes(gruppoAttivo))
+  );
+}
+
+// Stazioni prioritarie per il tabellone treni (a portata di mano).
 const STAZIONI_TRENI = [
   { nome: 'Termini',   placeId: 2416, codViaggiaTreno: 'S08409' },
   { nome: 'Tiburtina', placeId: 2385, codViaggiaTreno: 'S08217' },
@@ -166,6 +251,12 @@ function fmtMin(min) {
   return `${Math.floor(min/60)}h${String(Math.round(min%60)).padStart(2,'0')}`;
 }
 
+function fmtOrarioAssoluto(unixSeconds) {
+  if (!unixSeconds) return '—';
+  const d = new Date(unixSeconds * 1000);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
 async function caricaBus() {
   const el = document.getElementById('busEl');
   el.innerHTML = '<div class="loading">Caricamento bus...</div>';
@@ -181,48 +272,53 @@ async function caricaBus() {
 
     const ora = Date.now() / 1000;
     const corse = [];
+    const tratte = tratteFiltrate();
 
     for (const trip of json.dati) {
-      const coppia = COPPIE_LINEE.find(c => c.linea === trip.routeId);
-      if (!coppia) continue;
+      const tratteLinea = tratte.filter(t => String(t.linea) === String(trip.routeId));
+      if (tratteLinea.length === 0) continue;
 
-      const stopPartenza = trip.stopTimeUpdates.find(s => s.stopId === coppia.partenza);
-      const stopArrivo = trip.stopTimeUpdates.find(s => s.stopId === coppia.arrivo);
-      if (!stopPartenza) continue;
+      for (const tratta of tratteLinea) {
+        const stopPartenza = trip.stopTimeUpdates.find(s => s.stopId === tratta.partenza);
+        const stopArrivo = trip.stopTimeUpdates.find(s => s.stopId === tratta.arrivo);
+        if (!stopPartenza) continue;
 
-      const minutiAttesa = (stopPartenza.arrivalTime - ora) / 60;
-      if (minutiAttesa < -2 || minutiAttesa > 45) continue; // fuori range utile
+        const minutiAttesa = (stopPartenza.arrivalTime - ora) / 60;
+        if (minutiAttesa < -2 || minutiAttesa > 45) continue; // fuori range utile
 
-      corse.push({
-        linea: trip.routeId,
-        destinazione: coppia.destinazione,
-        minutiAttesa,
-        ritardoPartenza: stopPartenza.arrivalDelay,
-        orarioPartenza: stopPartenza.arrivalTime,
-        orarioArrivoDestinazione: stopArrivo ? stopArrivo.arrivalTime : null,
-        ritardoArrivo: stopArrivo ? stopArrivo.arrivalDelay : null,
-      });
+        corse.push({
+          linea: trip.routeId,
+          nomePartenza: tratta.nomePartenza,
+          nomeArrivo: tratta.nomeArrivo,
+          vehicleLabel: trip.vehicleLabel || trip.vehicleId || null,
+          minutiAttesa,
+          ritardoPartenza: stopPartenza.arrivalDelay,
+          orarioPartenza: stopPartenza.arrivalTime,
+          orarioArrivoDestinazione: stopArrivo ? stopArrivo.arrivalTime : null,
+          ritardoArrivo: stopArrivo ? stopArrivo.arrivalDelay : null,
+        });
+      }
     }
 
     corse.sort((a, b) => a.minutiAttesa - b.minutiAttesa);
 
     if (corse.length === 0) {
-      el.innerHTML = '<div class="vuoto">Nessun bus in arrivo nei prossimi 45 minuti</div>';
+      el.innerHTML = '<div class="vuoto">Nessun bus in arrivo nei prossimi 45 minuti per questo filtro</div>';
       return;
     }
 
-    el.innerHTML = corse.slice(0, 6).map(c => {
+    el.innerHTML = corse.slice(0, 8).map(c => {
       const urgenteClass = c.minutiAttesa < 5 ? 'urgente' : '';
       const attesaClass = c.minutiAttesa < 5 ? 'urgente' : c.minutiAttesa < 12 ? 'presto' : 'ok';
       const ritPartClass = c.ritardoPartenza > 60 ? 'rit-pos' : c.ritardoPartenza < -60 ? 'rit-neg' : 'rit-zero';
       const ritPartTxt = c.ritardoPartenza != null ? `${c.ritardoPartenza > 0 ? '+' : ''}${(c.ritardoPartenza/60).toFixed(1)}'` : '—';
 
-      let durataTxt = '—';
+      const orarioPassaggio = fmtOrarioAssoluto(c.orarioPartenza);
+      const orarioArrivoDest = c.orarioArrivoDestinazione ? fmtOrarioAssoluto(c.orarioArrivoDestinazione) : '—';
+
       let ritArrTxt = '—';
       let ritArrClass = 'rit-zero';
       if (c.orarioArrivoDestinazione) {
-        const durataMin = (c.orarioArrivoDestinazione - c.orarioPartenza) / 60;
-        durataTxt = `${Math.round(durataMin)}'`;
         ritArrClass = c.ritardoArrivo > 60 ? 'rit-pos' : c.ritardoArrivo < -60 ? 'rit-neg' : 'rit-zero';
         ritArrTxt = `${c.ritardoArrivo > 0 ? '+' : ''}${(c.ritardoArrivo/60).toFixed(1)}'`;
       }
@@ -232,18 +328,18 @@ async function caricaBus() {
           <div class="bus-top">
             <div class="bus-linea">
               <span class="badge-linea">${c.linea}</span>
-              <span class="bus-direzione">→ ${c.destinazione}</span>
+              <span class="bus-direzione">${c.nomePartenza} → ${c.nomeArrivo}</span>
             </div>
             <div class="bus-attesa">
               <div class="bus-attesa-val ${attesaClass}">${fmtMin(c.minutiAttesa)}</div>
               <div class="bus-attesa-sub">alla fermata</div>
             </div>
           </div>
-          <div class="bus-dettagli">
-            <span>Ritardo: <b class="${ritPartClass}">${ritPartTxt}</b></span>
-            <span>Durata tragitto: <b>${durataTxt}</b></span>
-            <span>Ritardo arrivo: <b class="${ritArrClass}">${ritArrTxt}</b></span>
+          <div class="bus-orari">
+            <span>Passaggio previsto: <b>${orarioPassaggio}</b> <span class="${ritPartClass}">${ritPartTxt}</span></span>
+            <span>Arrivo a destinazione: <b>${orarioArrivoDest}</b> <span class="${ritArrClass}">${ritArrTxt}</span></span>
           </div>
+          <div class="bus-vettura">Vettura: <b>${c.vehicleLabel || 'n.d.'}</b></div>
         </div>`;
     }).join('');
 
@@ -289,7 +385,6 @@ async function caricaTreni() {
 
     const lista = (modalitaAttiva === 'partenze' ? json.partenze : json.arrivi) || [];
 
-    // Filtro: solo i prossimi ~60' + ultima ora, escludiamo il "passato oltre ora"
     const filtrata = lista
       .filter(t => t.stato !== 'passato_oltre_ora')
       .sort((a, b) => (a.orarioProgrammato || '').localeCompare(b.orarioProgrammato || ''));
@@ -353,6 +448,7 @@ function aggiornaTutto() {
 }
 
 aggiornaOra();
+renderFiltriBus();
 renderTabsStazioni();
 renderTogglePA();
 aggiornaLinkRfi();
