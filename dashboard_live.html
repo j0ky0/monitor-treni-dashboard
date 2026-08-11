@@ -10,13 +10,15 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.2 (2026-08-11)
+     dashboard_live.html — v1.4 (2026-08-11)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
-     Questo distingue visivamente Live da Statistiche (che userà
+     Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
+     Novità v1.4: pallino lampeggiante "in partenza/in arrivo" nel
+     Monitor RFI (campo inArrivo già estratto dal parser Deno).
      ================================================================ */
   :root {
     --bg: #14171c;
@@ -129,6 +131,8 @@
   .treno-orario { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text); }
   .treno-bin { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
   .treno-stato { font-size: 0.66rem; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
+  .treno-lampeggio { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-left: 6px; vertical-align: middle; animation: pulse-treno 1.4s ease-in-out infinite; }
+  @keyframes pulse-treno { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
   .stato-in_orario { color: var(--green); }
   .stato-ritardo { color: var(--red); }
   .stato-cancellato { color: var(--red); font-weight: 700; }
@@ -223,10 +227,9 @@
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.3 (2026-08-11)
-// Novità v1.3: click su numero treno apre dettaglio_treno.html in
-// nuova scheda (percorso completo, orari teorici/reali, ritardi) al
-// posto dell'overlay in pagina. Vedi CHANGELOG.md.
+// dashboard_live.html — v1.4 (2026-08-11)
+// Novità v1.4: pallino lampeggiante "in partenza/in arrivo" nel
+// Monitor RFI (campo inArrivo del parser Deno). Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -551,6 +554,9 @@ async function caricaTreniRFI() {
 
     el.innerHTML = lista.map(t => {
       const binario = t.binario || '—';
+      const etichettaLampeggio = modalitaAttiva === 'arrivi' ? 'In arrivo' : 'In partenza';
+      const puntinoLampeggio = t.inArrivo === true
+        ? `<span class="treno-lampeggio" title="${etichettaLampeggio}"></span>` : '';
       return `
         <div class="treno-row">
           <div class="treno-sx">
@@ -561,7 +567,7 @@ async function caricaTreniRFI() {
             <div class="treno-dest">${t.stazione || '—'}</div>
           </div>
           <div class="treno-dx">
-            <div class="treno-orario">${t.orario || '—'}</div>
+            <div class="treno-orario">${t.orario || '—'}${puntinoLampeggio}</div>
             <div class="treno-bin">bin. ${binario}</div>
             ${formattaStatoTreno(t)}
           </div>
