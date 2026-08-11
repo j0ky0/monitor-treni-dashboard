@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#14171c">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚉</text></svg>">
+<title>Monitor Live — Pendolare</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ================================================================
+     dashboard_live.html — v1.2 (2026-08-11)
+     Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
+     dashboard del progetto, ma con doppio accento di modulo:
+       --amber = modulo Treni (RFI + ViaggiaTreno)
+       --teal  = modulo Bus (ATAC)
+     Questo distingue visivamente Live da Statistiche (che userà
+     un terzo accento, viola) E i due moduli interni tra loro.
+     ================================================================ */
+  :root {
+    --bg: #14171c;
+    --bg-panel: #1c2029;
+    --bg-flap: #0e1015;
+    --rule: #2a2f3a;
+    --amber: #f0b429;
+    --amber-dim: #a8801f;
+    --teal: #2dd4bf;
+    --teal-dim: #1f8f82;
+    --text: #e8e6df;
+    --text-muted: #7d828c;
+    --red: #e2574c;
+    --green: #4caf7d;
+    --blue: #4a90d9;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+  header { padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; }
+  .titolo { font-family: var(--font-mono); font-weight: 700; font-size: 1.3rem; letter-spacing: 0.02em; color: var(--amber); display: flex; align-items: baseline; gap: 0.5rem; }
+  .titolo .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .ora-sub { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; font-family: var(--font-mono); }
+  .btn-refresh { background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 0.5rem 0.8rem; font-size: 0.8rem; color: var(--text-muted); cursor: pointer; font-family: var(--font-sans); }
+  .btn-refresh:active { background: var(--bg-panel); }
+
+  .section-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 1.5rem 0 0.6rem; display: flex; align-items: center; gap: 6px; padding-left: 8px; border-left: 3px solid var(--rule); }
+  .section-label.mod-treni { border-left-color: var(--amber-dim); }
+  .section-label.mod-bus { border-left-color: var(--teal-dim); }
+
+  /* --- Ricerca vettura (modulo Bus — turchese) --- */
+  .ricerca-vettura { display: flex; gap: 6px; margin-bottom: 12px; }
+  .ricerca-vettura input { flex: 1; background: var(--bg-flap); border: 1px solid var(--rule); color: var(--text); font-family: var(--font-mono); font-size: 0.85rem; padding: 8px 10px; border-radius: 6px; }
+  .ricerca-vettura input::placeholder { color: var(--text-muted); }
+  .ricerca-vettura button { background: var(--teal); color: #04201d; border: none; font-weight: 600; font-size: 0.8rem; padding: 8px 14px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+
+  /* --- Filtro doppio Bus: riga Andata/Ritorno + riga DD/LL --- */
+  .bus-filtri { margin-bottom: 12px; }
+  .bus-filtri .riga-filtro { display: flex; gap: 6px; margin-bottom: 6px; }
+  .bus-filtri .riga-filtro:last-child { margin-bottom: 0; }
+  .bus-filtri button { flex: 1; font-size: 0.78rem; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font-family: var(--font-sans); font-weight: 500; }
+  .bus-filtri button.on { background: rgba(45,212,175,0.12); border-color: var(--teal-dim); color: var(--teal); }
+  .bus-filtri .riga-sub button { font-size: 0.72rem; padding: 6px 10px; }
+
+  .bus-card { background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; padding: 0.9rem 1rem; margin-bottom: 8px; cursor: pointer; }
+  .bus-card:active { border-color: var(--teal-dim); }
+  .bus-card.urgente { border-color: var(--red); }
+  .bus-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .bus-linea { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .badge-linea { background: var(--bg-flap); border: 1px solid var(--rule); color: var(--teal); font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; padding: 3px 9px; border-radius: 6px; flex-shrink: 0; }
+  .bus-direzione { font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bus-attesa { text-align: right; flex-shrink: 0; }
+  .bus-attesa-val { font-family: var(--font-mono); font-weight: 700; font-size: 1.3rem; }
+  .bus-attesa-val.ok { color: var(--green); }
+  .bus-attesa-val.presto { color: var(--teal); }
+  .bus-attesa-val.urgente { color: var(--red); }
+  .bus-attesa-sub { font-size: 0.68rem; color: var(--text-muted); }
+
+  .bus-orari { display: flex; flex-direction: column; gap: 3px; font-size: 0.74rem; color: var(--text-muted); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); }
+  .bus-orari b { color: var(--text); font-family: var(--font-mono); font-weight: 600; }
+  .rit-neg { color: var(--green); }
+  .rit-pos { color: var(--red); }
+  .rit-zero { color: var(--text-muted); }
+
+  .bus-vettura { font-size: 0.7rem; color: var(--text-muted); margin-top: 6px; }
+  .bus-vettura b { color: var(--text); font-family: var(--font-mono); }
+  .bus-vettura .tap-hint { color: var(--teal-dim); margin-left: 4px; }
+
+  /* --- Pannello tracciamento vettura (modulo Bus — turchese) --- */
+  .tracking-header { display: flex; justify-content: space-between; align-items: center; background: var(--bg-panel); border: 1px solid var(--teal-dim); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .tracking-header .titolo-tracking { font-family: var(--font-mono); font-size: 0.85rem; color: var(--teal); }
+  .tracking-header .titolo-tracking b { font-weight: 700; }
+  .tracking-header button { background: none; border: 1px solid var(--rule); color: var(--text-muted); font-size: 0.72rem; padding: 5px 10px; border-radius: 6px; cursor: pointer; }
+
+  .tracking-list-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+  .tracking-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--rule); gap: 8px; }
+  .tracking-row:last-child { border-bottom: none; }
+  .tracking-row.evidenziata { background: rgba(45,212,175,0.08); }
+  .tracking-sx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .tracking-nome { font-size: 0.82rem; color: var(--text); }
+  .tracking-row.evidenziata .tracking-nome { color: var(--teal); font-weight: 600; }
+  .tracking-seq { font-size: 0.68rem; color: var(--text-muted); font-family: var(--font-mono); }
+  .tracking-dx { text-align: right; flex-shrink: 0; }
+  .tracking-relativo { font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem; color: var(--text); }
+  .tracking-assoluto { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
+
+  /* --- Modulo Treni (ambra) --- */
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { font-size: 0.75rem; padding: 5px 11px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; white-space: nowrap; flex-shrink: 0; font-family: var(--font-sans); }
+  .tab.on { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); }
+
+  .toggle-pa { display: flex; gap: 6px; margin-bottom: 10px; }
+  .toggle-pa button { flex: 1; font-size: 0.78rem; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font-family: var(--font-sans); }
+  .toggle-pa button.on { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); font-weight: 600; }
+
+  .treno-list-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+  .treno-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--rule); gap: 8px; }
+  .treno-row:last-child { border-bottom: none; }
+  .treno-sx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .treno-num-riga { display: flex; align-items: baseline; gap: 6px; }
+  .treno-num { font-family: var(--font-mono); color: var(--amber); font-weight: 700; font-size: 0.85rem; background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--amber-dim); text-underline-offset: 2px; }
+  .treno-num:active { color: #fff; }
+  .treno-cat { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; }
+  .treno-dest { font-size: 0.78rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .treno-dx { text-align: right; flex-shrink: 0; }
+  .treno-orario { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text); }
+  .treno-bin { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
+  .treno-stato { font-size: 0.66rem; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
+  .stato-in_orario { color: var(--green); }
+  .stato-ritardo { color: var(--red); }
+  .stato-cancellato { color: var(--red); font-weight: 700; }
+  .stato-sconosciuto { color: var(--text-muted); }
+
+  .rfi-link-esterno { display: block; text-align: center; font-size: 0.72rem; color: var(--text-muted); padding: 10px 0 4px; }
+  .rfi-link-esterno a { color: var(--text-muted); }
+
+  .section-label-row { display: flex; justify-content: space-between; align-items: center; }
+  .btn-vista-alt { background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 3px 8px; font-size: 0.68rem; color: var(--text-muted); cursor: pointer; text-transform: none; letter-spacing: 0; font-family: var(--font-sans); }
+
+  .treno-dettaglio-row { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 0.8rem; }
+  .treno-dettaglio-row:last-child { border-bottom: none; }
+  .treno-dettaglio-row .k { color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase; margin-bottom: 2px; }
+  .treno-dettaglio-row .v { color: var(--text); font-family: var(--font-mono); }
+
+  .loading, .vuoto, .errore { text-align: center; padding: 1.5rem 1rem; color: var(--text-muted); font-size: 0.82rem; }
+  .errore { color: var(--red); }
+
+  footer { text-align: center; font-size: 0.68rem; color: var(--text-muted); margin-top: 2rem; font-family: var(--font-mono); line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="titolo"><span class="dot"></span>MONITOR LIVE</div>
+      <div class="ora-sub" id="oraEl">--:--</div>
+    </div>
+    <button class="btn-refresh" onclick="aggiornaTutto()">↻ Aggiorna</button>
+  </header>
+
+  <div class="section-label mod-bus">🚌 Bus in tempo reale</div>
+
+  <div class="ricerca-vettura">
+    <input type="text" id="inputMatricola" placeholder="Cerca vettura per matricola (es. 3504)" inputmode="numeric">
+    <button onclick="avviaTracciamentoDaInput()">Traccia</button>
+  </div>
+
+  <div id="busPannelloNormale">
+    <div class="bus-filtri" id="busFiltri">
+      <div class="riga-filtro">
+        <button id="btnBusAndata" onclick="selDirezione('andata')">Andata</button>
+        <button id="btnBusRitorno" onclick="selDirezione('ritorno')">Ritorno</button>
+      </div>
+      <div class="riga-filtro riga-sub">
+        <button id="btnBusDD" onclick="selGruppo('DD')">DD</button>
+        <button id="btnBusLL" onclick="selGruppo('LL')">LL</button>
+      </div>
+    </div>
+    <div id="busEl"><div class="loading">Caricamento...</div></div>
+  </div>
+
+  <div id="vetturaPannello" style="display:none;">
+    <div class="tracking-header">
+      <div class="titolo-tracking">Vettura <b id="trackingMatricolaLabel"></b></div>
+      <button onclick="chiudiTracciamento()">✕ Chiudi</button>
+    </div>
+    <div class="tracking-list-wrap">
+      <div id="trackingEl"><div class="loading">Caricamento...</div></div>
+    </div>
+  </div>
+
+  <div class="section-label mod-treni section-label-row">
+    <span>🚆 Treni — Monitor RFI</span>
+    <button class="btn-vista-alt" onclick="toggleVistaClassica()" id="btnVistaClassica">Vista classica ▾</button>
+  </div>
+  <div class="tabs" id="stazioniTabs"></div>
+  <div class="toggle-pa" id="togglePA">
+    <button id="btnPartenze" onclick="selModalita('partenze')">Partenze</button>
+    <button id="btnArrivi" onclick="selModalita('arrivi')">Arrivi</button>
+  </div>
+  <div class="treno-list-wrap">
+    <div id="treniRfiEl"><div class="loading">Caricamento...</div></div>
+  </div>
+  <div class="rfi-link-esterno" id="rfiLinkEsterno"></div>
+
+  <div id="trenoPannello" style="display:none;">
+    <div class="tracking-header">
+      <div class="titolo-tracking">Treno <b id="trenoDettaglioLabel"></b></div>
+      <button onclick="chiudiDettaglioTreno()">✕ Chiudi</button>
+    </div>
+    <div class="tracking-list-wrap">
+      <div id="trenoDettaglioEl"><div class="loading">Caricamento...</div></div>
+    </div>
+  </div>
+
+  <div id="vistaClassicaWrap" style="display:none;">
+    <div class="section-label mod-treni">🚆 Treni — tabellone ViaggiaTreno (vista classica)</div>
+    <div class="treno-list-wrap">
+      <div id="treniEl"><div class="loading">Caricamento...</div></div>
+    </div>
+  </div>
+
+  <footer>
+    Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
+    Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico
+  </footer>
+
+</div>
+
+<script>
+// ================================================================
+// dashboard_live.html — v1.2 (2026-08-11)
+// Novità v1.2: colori distinti per modulo (ambra=Treni, teal=Bus),
+// distinti anche dalla Dashboard Statistiche (viola). Vedi CHANGELOG.md.
+// ================================================================
+// CONFIGURAZIONE
+// ================================================================
+const WORKER_URL = 'https://fragrant-shape-56bd.zargonabio.workers.dev';
+const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
+
+// ----------------------------------------------------------------
+// TRATTE BUS: una riga per ogni combinazione linea+direzione+fermate
+// (dal foglio tratte_bus.xlsx).
+// ----------------------------------------------------------------
+const TRATTE_BUS_RAW = [
+  { linea: '490', direzione: 'ritorno', partenza: '74299', nomePartenza: "C.so d'Italia/P.za Fiume", arrivo: '82007', nomeArrivo: 'Staz.ne Tiburtina (MB)', ll: true,  dd: true  },
+  { linea: '495', direzione: 'ritorno', partenza: '74299', nomePartenza: "C.so d'Italia/P.za Fiume", arrivo: '82005', nomeArrivo: 'Staz.ne Tiburtina (MB)', ll: true,  dd: true  },
+  { linea: '80',  direzione: 'ritorno', partenza: '72661', nomePartenza: 'Fiume',                     arrivo: '72685', nomeArrivo: 'Libia (MB1)',              ll: true,  dd: false },
+  { linea: '38',  direzione: 'ritorno', partenza: '72661', nomePartenza: 'Fiume',                     arrivo: '72685', nomeArrivo: 'Libia (MB1)',              ll: true,  dd: false },
+  { linea: '83',  direzione: 'ritorno', partenza: '84300', nomePartenza: "Po/C.so d'Italia",          arrivo: '72685', nomeArrivo: 'Libia (MB1)',              ll: true,  dd: false },
+  { linea: '490', direzione: 'andata',  partenza: '82007', nomePartenza: 'Staz.ne Tiburtina (MB)',    arrivo: '74308', nomeArrivo: 'Fiume',                    ll: true,  dd: true  },
+  { linea: '495', direzione: 'andata',  partenza: '82005', nomePartenza: 'Staz.ne Tiburtina (MB)',    arrivo: '74308', nomeArrivo: 'Fiume',                    ll: true,  dd: true  },
+  { linea: '83',  direzione: 'andata',  partenza: '81874', nomePartenza: 'Libia (MB1)',               arrivo: '84299', nomeArrivo: "Po/C.so d'Italia",         ll: true,  dd: false },
+  { linea: '80',  direzione: 'andata',  partenza: '81874', nomePartenza: 'Libia (MB1)',               arrivo: '76852', nomeArrivo: 'Viterbo',                  ll: true,  dd: false },
+  { linea: '38',  direzione: 'andata',  partenza: '81874', nomePartenza: 'Libia (MB1)',               arrivo: '76852', nomeArrivo: 'Viterbo',                  ll: true,  dd: false, nota: 'tratta 1' },
+  { linea: '38',  direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '72661', nomeArrivo: 'Fiume',                    ll: false, dd: true,  nota: 'tratta 2' },
+  { linea: '38',  direzione: 'ritorno', partenza: '76852', nomePartenza: 'Viterbo',                   arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true,  nota: 'tratta 3' },
+  { linea: '62',  direzione: 'andata',  partenza: '83173', nomePartenza: 'Staz.ne Tiburtina (MB)',    arrivo: '71555', nomeArrivo: 'Porta Pia',                ll: true,  dd: true  },
+  { linea: '92',  direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '73624', nomeArrivo: 'Fiume',                    ll: false, dd: true  },
+  { linea: '92',  direzione: 'ritorno', partenza: '70237', nomePartenza: 'Salaria/Aniene',            arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true  },
+  { linea: '360', direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '70446', nomeArrivo: 'Fiume',                    ll: false, dd: true  },
+  { linea: '360', direzione: 'ritorno', partenza: '70237', nomePartenza: 'Salaria/Aniene',            arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true  },
+  { linea: '223', direzione: 'andata',  partenza: '70441', nomePartenza: 'Volturno/Gaeta',            arrivo: '70446', nomeArrivo: 'Fiume',                    ll: false, dd: true  },
+  { linea: '223', direzione: 'ritorno', partenza: '70237', nomePartenza: 'Salaria/Aniene',            arrivo: '70239', nomeArrivo: 'Indipendenza',             ll: false, dd: true  },
+];
+
+const TRATTE_BUS = TRATTE_BUS_RAW.map((t, i) => {
+  const gruppi = [];
+  if (t.ll) gruppi.push('LL');
+  if (t.dd) gruppi.push('DD');
+  if (gruppi.length === 0) { gruppi.push('LL', 'DD'); } // fail-open
+  return { id: `${t.linea}-${t.direzione}-${i}`, ...t, gruppi };
+});
+
+// Set di stopId che sono partenza o arrivo di ALMENO una tratta —
+// usato per evidenziare le "fermate abituali" nel tracciamento vettura
+const FERMATE_ABITUALI = new Set(TRATTE_BUS.flatMap(t => [t.partenza, t.arrivo]));
+
+// Stato filtro doppio: Direzione (sempre uno attivo) + Gruppo
+let direzioneAttiva = 'ritorno';
+let gruppoAttivo = 'LL';
+
+function defaultGruppoPer(direzione) {
+  return direzione === 'andata' ? 'DD' : 'LL';
+}
+
+function selDirezione(direzione) {
+  direzioneAttiva = direzione;
+  gruppoAttivo = defaultGruppoPer(direzione);
+  renderFiltriBus();
+  caricaBus();
+}
+
+function selGruppo(gruppo) {
+  gruppoAttivo = (gruppoAttivo === gruppo) ? null : gruppo;
+  renderFiltriBus();
+  caricaBus();
+}
+
+function renderFiltriBus() {
+  document.getElementById('btnBusAndata').classList.toggle('on', direzioneAttiva === 'andata');
+  document.getElementById('btnBusRitorno').classList.toggle('on', direzioneAttiva === 'ritorno');
+  document.getElementById('btnBusDD').classList.toggle('on', gruppoAttivo === 'DD');
+  document.getElementById('btnBusLL').classList.toggle('on', gruppoAttivo === 'LL');
+}
+
+function tratteFiltrate() {
+  return TRATTE_BUS.filter(t =>
+    t.direzione === direzioneAttiva &&
+    (gruppoAttivo === null || t.gruppi.includes(gruppoAttivo))
+  );
+}
+
+// Stazioni prioritarie per il tabellone treni
+const STAZIONI_TRENI = [
+  { nome: 'Termini',   placeId: 2416, codViaggiaTreno: 'S08409' },
+  { nome: 'Tiburtina', placeId: 2385, codViaggiaTreno: 'S08217' },
+  { nome: 'Nomentana', placeId: 3411, codViaggiaTreno: 'S08236' },
+  { nome: 'Ostiense',  placeId: 2379, codViaggiaTreno: 'S08406' },
+  { nome: 'Orte',      placeId: 1959, codViaggiaTreno: 'S08209' },
+  { nome: 'Fiumicino', placeId: 1327, codViaggiaTreno: 'S08411' },
+];
+
+let stazioneAttiva = STAZIONI_TRENI[1];
+let modalitaAttiva = 'partenze';
+let vistaClassicaAperta = false;
+let trenoDettaglioApertoNum = null;
+
+// Stato tracciamento vettura: null = pannello normale, stringa = matricola tracciata
+let vetturaTracciata = null;
+
+// ================================================================
+// OROLOGIO
+// ================================================================
+function aggiornaOra() {
+  const now = new Date();
+  const gg = ['dom','lun','mar','mer','gio','ven','sab'];
+  const mm = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  document.getElementById('oraEl').textContent =
+    `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} · ${gg[now.getDay()]} ${now.getDate()} ${mm[now.getMonth()]}`;
+}
+
+// ================================================================
+// BUS — chiamata al Worker Cloudflare
+// ================================================================
+function fmtMin(min) {
+  if (min < 1) return 'ora';
+  if (min < 60) return `${Math.round(min)}'`;
+  return `${Math.floor(min/60)}h${String(Math.round(min%60)).padStart(2,'0')}`;
+}
+
+function fmtOrarioAssoluto(unixSeconds) {
+  if (!unixSeconds) return '—';
+  const d = new Date(unixSeconds * 1000);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+async function caricaBus() {
+  const el = document.getElementById('busEl');
+  el.innerHTML = '<div class="loading">Caricamento bus...</div>';
+
+  try {
+    const risposta = await fetch(`${WORKER_URL}/trip-updates`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
+      return;
+    }
+
+    const ora = Date.now() / 1000;
+    const corse = [];
+    const tratte = tratteFiltrate();
+
+    for (const trip of json.dati) {
+      const tratteLinea = tratte.filter(t => String(t.linea) === String(trip.routeId));
+      if (tratteLinea.length === 0) continue;
+
+      for (const tratta of tratteLinea) {
+        const stopPartenza = trip.stopTimeUpdates.find(s => s.stopId === tratta.partenza);
+        const stopArrivo = trip.stopTimeUpdates.find(s => s.stopId === tratta.arrivo);
+        if (!stopPartenza) continue;
+
+        const minutiAttesa = (stopPartenza.arrivalTime - ora) / 60;
+        if (minutiAttesa < -2 || minutiAttesa > 45) continue;
+
+        corse.push({
+          linea: trip.routeId,
+          nomePartenza: tratta.nomePartenza,
+          nomeArrivo: tratta.nomeArrivo,
+          vehicleLabel: trip.vehicleLabel || trip.vehicleId || null,
+          minutiAttesa,
+          ritardoPartenza: stopPartenza.arrivalDelay,
+          orarioPartenza: stopPartenza.arrivalTime,
+          orarioArrivoDestinazione: stopArrivo ? stopArrivo.arrivalTime : null,
+          ritardoArrivo: stopArrivo ? stopArrivo.arrivalDelay : null,
+        });
+      }
+    }
+
+    corse.sort((a, b) => a.minutiAttesa - b.minutiAttesa);
+
+    if (corse.length === 0) {
+      el.innerHTML = '<div class="vuoto">Nessun bus in arrivo nei prossimi 45 minuti per questo filtro</div>';
+      return;
+    }
+
+    el.innerHTML = corse.slice(0, 8).map(c => {
+      const urgenteClass = c.minutiAttesa < 5 ? 'urgente' : '';
+      const attesaClass = c.minutiAttesa < 5 ? 'urgente' : c.minutiAttesa < 12 ? 'presto' : 'ok';
+      const ritPartClass = c.ritardoPartenza > 60 ? 'rit-pos' : c.ritardoPartenza < -60 ? 'rit-neg' : 'rit-zero';
+      const ritPartTxt = c.ritardoPartenza != null ? `${c.ritardoPartenza > 0 ? '+' : ''}${(c.ritardoPartenza/60).toFixed(1)}'` : '—';
+
+      const orarioPassaggio = fmtOrarioAssoluto(c.orarioPartenza);
+      const orarioArrivoDest = c.orarioArrivoDestinazione ? fmtOrarioAssoluto(c.orarioArrivoDestinazione) : '—';
+
+      let ritArrTxt = '—';
+      let ritArrClass = 'rit-zero';
+      if (c.orarioArrivoDestinazione) {
+        ritArrClass = c.ritardoArrivo > 60 ? 'rit-pos' : c.ritardoArrivo < -60 ? 'rit-neg' : 'rit-zero';
+        ritArrTxt = `${c.ritardoArrivo > 0 ? '+' : ''}${(c.ritardoArrivo/60).toFixed(1)}'`;
+      }
+
+      const matricolaAttr = c.vehicleLabel ? `onclick="avviaTracciamento('${c.vehicleLabel}')"` : '';
+      const tapHint = c.vehicleLabel ? '<span class="tap-hint">(tocca per tracciare)</span>' : '';
+
+      return `
+        <div class="bus-card ${urgenteClass}" ${matricolaAttr}>
+          <div class="bus-top">
+            <div class="bus-linea">
+              <span class="badge-linea">${c.linea}</span>
+              <span class="bus-direzione">${c.nomePartenza} → ${c.nomeArrivo}</span>
+            </div>
+            <div class="bus-attesa">
+              <div class="bus-attesa-val ${attesaClass}">${fmtMin(c.minutiAttesa)}</div>
+              <div class="bus-attesa-sub">alla fermata</div>
+            </div>
+          </div>
+          <div class="bus-orari">
+            <span>Passaggio previsto: <b>${orarioPassaggio}</b> <span class="${ritPartClass}">${ritPartTxt}</span></span>
+            <span>Arrivo a destinazione: <b>${orarioArrivoDest}</b> <span class="${ritArrClass}">${ritArrTxt}</span></span>
+          </div>
+          <div class="bus-vettura">Vettura: <b>${c.vehicleLabel || 'n.d.'}</b>${tapHint}</div>
+        </div>`;
+    }).join('');
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+// ================================================================
+// TRACCIAMENTO VETTURA SPECIFICA
+// ================================================================
+function avviaTracciamentoDaInput() {
+  const valore = document.getElementById('inputMatricola').value.trim();
+  if (!valore) return;
+  avviaTracciamento(valore);
+}
+
+function avviaTracciamento(matricola) {
+  vetturaTracciata = matricola;
+  document.getElementById('inputMatricola').value = matricola;
+  document.getElementById('trackingMatricolaLabel').textContent = matricola;
+  document.getElementById('busPannelloNormale').style.display = 'none';
+  document.getElementById('vetturaPannello').style.display = 'block';
+  caricaVettura();
+}
+
+function chiudiTracciamento() {
+  vetturaTracciata = null;
+  document.getElementById('busPannelloNormale').style.display = 'block';
+  document.getElementById('vetturaPannello').style.display = 'none';
+  caricaBus();
+}
+
+async function caricaVettura() {
+  const el = document.getElementById('trackingEl');
+  el.innerHTML = '<div class="loading">Ricerca vettura in corso...</div>';
+
+  try {
+    const risposta = await fetch(`${WORKER_URL}/vettura/${encodeURIComponent(vetturaTracciata)}`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="vuoto">${json.errore}</div>`;
+      return;
+    }
+
+    const fermate = (json.stopTimeUpdates || []);
+    if (fermate.length === 0) {
+      el.innerHTML = '<div class="vuoto">Nessuna fermata futura per questa vettura (potrebbe essere a fine corsa)</div>';
+      return;
+    }
+
+    const ora = Date.now() / 1000;
+
+    el.innerHTML = fermate.map(f => {
+      const nome = f.nomeFermata || `Fermata ${f.stopId}`;
+      const evidenziata = FERMATE_ABITUALI.has(f.stopId);
+      const minutiAttesa = f.arrivalTime ? (f.arrivalTime - ora) / 60 : null;
+      const relativo = minutiAttesa !== null ? fmtMin(minutiAttesa) : '—';
+      const assoluto = fmtOrarioAssoluto(f.arrivalTime);
+
+      return `
+        <div class="tracking-row ${evidenziata ? 'evidenziata' : ''}">
+          <div class="tracking-sx">
+            <div class="tracking-nome">${nome}</div>
+            <div class="tracking-seq">seq. ${f.stopSequence ?? '—'}</div>
+          </div>
+          <div class="tracking-dx">
+            <div class="tracking-relativo">${relativo}</div>
+            <div class="tracking-assoluto">${assoluto}</div>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+// ================================================================
+// TRENI — Monitor RFI (vista principale)
+// ================================================================
+function formattaStatoTreno(t) {
+  const stato = t.stato || 'sconosciuto';
+  const mappaTesto = {
+    in_orario: 'In orario',
+    ritardo: t.ritardoAriaLabel || (t.ritardoTesto ? `Ritardo ${t.ritardoTesto}'` : 'In ritardo'),
+    cancellato: 'Cancellato',
+    sconosciuto: '—'
+  };
+  return `<div class="treno-stato stato-${stato}">${mappaTesto[stato] || stato}</div>`;
+}
+
+async function caricaTreniRFI() {
+  const el = document.getElementById('treniRfiEl');
+  el.innerHTML = '<div class="loading">Caricamento tabellone RFI...</div>';
+
+  try {
+    const arrivals = modalitaAttiva === 'arrivi';
+    const risposta = await fetch(`${DENO_URL}/rfi-tabellone/${stazioneAttiva.placeId}?arrivals=${arrivals}`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
+      return;
+    }
+
+    const lista = Array.isArray(json) ? json : (json.treni || []);
+
+    if (lista.length === 0) {
+      el.innerHTML = '<div class="vuoto">Nessun treno nella finestra attuale</div>';
+      return;
+    }
+
+    el.innerHTML = lista.map(t => {
+      const binario = t.binario || '—';
+      return `
+        <div class="treno-row">
+          <div class="treno-sx">
+            <div class="treno-num-riga">
+              <button class="treno-num" onclick="apriDettaglioTreno('${t.numeroTreno}')">${t.numeroTreno}</button>
+              <span class="treno-cat">${t.operatore || ''} ${t.categoria || ''}</span>
+            </div>
+            <div class="treno-dest">${t.stazione || '—'}</div>
+          </div>
+          <div class="treno-dx">
+            <div class="treno-orario">${t.orario || '—'}</div>
+            <div class="treno-bin">bin. ${binario}</div>
+            ${formattaStatoTreno(t)}
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+function toggleVistaClassica() {
+  vistaClassicaAperta = !vistaClassicaAperta;
+  document.getElementById('vistaClassicaWrap').style.display = vistaClassicaAperta ? 'block' : 'none';
+  document.getElementById('btnVistaClassica').textContent = vistaClassicaAperta ? 'Vista classica ▴' : 'Vista classica ▾';
+  if (vistaClassicaAperta) caricaTreni();
+}
+
+function apriDettaglioTreno(numeroTreno) {
+  trenoDettaglioApertoNum = numeroTreno;
+  document.getElementById('trenoDettaglioLabel').textContent = numeroTreno;
+  document.getElementById('trenoPannello').style.display = 'block';
+  caricaDettaglioTreno();
+}
+
+function chiudiDettaglioTreno() {
+  trenoDettaglioApertoNum = null;
+  document.getElementById('trenoPannello').style.display = 'none';
+}
+
+async function caricaDettaglioTreno() {
+  const el = document.getElementById('trenoDettaglioEl');
+  el.innerHTML = '<div class="loading">Caricamento dettaglio...</div>';
+
+  try {
+    const risposta = await fetch(`${DENO_URL}/treno/${encodeURIComponent(trenoDettaglioApertoNum)}`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="vuoto">${json.errore}</div>`;
+      return;
+    }
+
+    // Rendering difensivo: campi comuni se presenti, altrimenti dump leggibile.
+    // NOTA: da rifinire una volta verificata la struttura reale della risposta.
+    const campiNoti = ['stazionePartenza', 'stazioneArrivo', 'orarioPartenza', 'orarioArrivo',
+      'ritardo', 'stato', 'binarioProgrammato', 'binarioEffettivo', 'ultimoRilevamento'];
+    const righeNote = campiNoti
+      .filter(k => json[k] !== undefined && json[k] !== null)
+      .map(k => `<div class="treno-dettaglio-row"><div class="k">${k}</div><div class="v">${json[k]}</div></div>`)
+      .join('');
+
+    const fermate = Array.isArray(json.fermate) ? json.fermate : [];
+    const righeFermate = fermate.map(f => `
+      <div class="tracking-row">
+        <div class="tracking-sx">
+          <div class="tracking-nome">${f.stazione || f.nome || '—'}</div>
+        </div>
+        <div class="tracking-dx">
+          <div class="tracking-relativo">${f.orario || f.orarioProgrammato || '—'}</div>
+          ${f.ritardo !== undefined ? `<div class="tracking-assoluto">${f.ritardo > 0 ? '+' : ''}${f.ritardo}'</div>` : ''}
+        </div>
+      </div>`).join('');
+
+    if (righeNote || righeFermate) {
+      el.innerHTML = righeNote + righeFermate;
+    } else {
+      el.innerHTML = `<div class="treno-dettaglio-row"><pre style="white-space:pre-wrap;margin:0;font-size:0.72rem;color:var(--text-muted);">${JSON.stringify(json, null, 2)}</pre></div>`;
+    }
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+// ================================================================
+// TRENI — tabellone via Deno (ViaggiaTreno) — VISTA CLASSICA (nascosta)
+// ================================================================
+function renderTabsStazioni() {
+  const tabsEl = document.getElementById('stazioniTabs');
+  tabsEl.innerHTML = STAZIONI_TRENI.map(s =>
+    `<button class="tab${s.codViaggiaTreno === stazioneAttiva.codViaggiaTreno ? ' on' : ''}" onclick="selStazione('${s.codViaggiaTreno}')">${s.nome}</button>`
+  ).join('');
+}
+
+function renderTogglePA() {
+  document.getElementById('btnPartenze').classList.toggle('on', modalitaAttiva === 'partenze');
+  document.getElementById('btnArrivi').classList.toggle('on', modalitaAttiva === 'arrivi');
+}
+
+function formattaRitardoTreno(min) {
+  if (min === null || min === undefined) return '<span class="rit-zero">—</span>';
+  const cls = min > 0 ? 'rit-pos' : min < 0 ? 'rit-neg' : 'rit-zero';
+  const segno = min > 0 ? '+' : '';
+  return `<span class="${cls}">${segno}${min}'</span>`;
+}
+
+async function caricaTreni() {
+  const el = document.getElementById('treniEl');
+  el.innerHTML = '<div class="loading">Caricamento tabellone...</div>';
+
+  try {
+    const risposta = await fetch(`${DENO_URL}/tabellone/${stazioneAttiva.codViaggiaTreno}`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
+      return;
+    }
+
+    const lista = (modalitaAttiva === 'partenze' ? json.partenze : json.arrivi) || [];
+
+    const filtrata = lista
+      .filter(t => t.stato !== 'passato_oltre_ora')
+      .sort((a, b) => (a.orarioProgrammato || '').localeCompare(b.orarioProgrammato || ''));
+
+    if (filtrata.length === 0) {
+      el.innerHTML = '<div class="vuoto">Nessun treno nella finestra attuale</div>';
+      return;
+    }
+
+    el.innerHTML = filtrata.map(t => {
+      const destOrig = modalitaAttiva === 'partenze' ? t.destinazione : t.origine;
+      const binario = t.binarioEffettivo || t.binarioProgrammato || '—';
+      return `
+        <div class="treno-row">
+          <div class="treno-sx">
+            <div class="treno-num-riga">
+              <span class="treno-num">${t.numeroTreno}</span>
+              <span class="treno-cat">${t.categoria || ''}</span>
+            </div>
+            <div class="treno-dest">${destOrig || '—'}</div>
+          </div>
+          <div class="treno-dx">
+            <div class="treno-orario">${t.orarioProgrammato || '—'} ${formattaRitardoTreno(t.ritardo)}</div>
+            <div class="treno-bin">bin. ${binario}</div>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+function aggiornaLinkRfi() {
+  const url = `https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Monitor?placeId=${stazioneAttiva.placeId}&arrivals=${modalitaAttiva === 'arrivi'}`;
+  document.getElementById('rfiLinkEsterno').innerHTML =
+    `<a href="${url}" target="_blank" rel="noopener">Apri il tabellone ufficiale RFI ↗</a>`;
+}
+
+function selStazione(codViaggiaTreno) {
+  stazioneAttiva = STAZIONI_TRENI.find(s => s.codViaggiaTreno === codViaggiaTreno);
+  renderTabsStazioni();
+  aggiornaLinkRfi();
+  caricaTreniRFI();
+  if (vistaClassicaAperta) caricaTreni();
+}
+
+function selModalita(modalita) {
+  modalitaAttiva = modalita;
+  renderTogglePA();
+  aggiornaLinkRfi();
+  caricaTreniRFI();
+  if (vistaClassicaAperta) caricaTreni();
+}
+
+// ================================================================
+// AVVIO
+// ================================================================
+function aggiornaTutto() {
+  aggiornaOra();
+  if (vetturaTracciata) {
+    caricaVettura();
+  } else {
+    caricaBus();
+  }
+  caricaTreniRFI();
+  if (vistaClassicaAperta) caricaTreni();
+  if (trenoDettaglioApertoNum) caricaDettaglioTreno();
+}
+
+aggiornaOra();
+renderFiltriBus();
+renderTabsStazioni();
+renderTogglePA();
+aggiornaLinkRfi();
+caricaBus();
+caricaTreniRFI();
+setInterval(aggiornaOra, 30000);
+</script>
+</body>
+</html>

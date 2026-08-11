@@ -3,19 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#14171c">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
 <title>Monitor Treni — Statistiche</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
+  /* ================================================================
+     dashboard.html — v2.1 (2026-08-11)
+     Identità: MONITOR TRENI (Statistiche) — accento VIOLA, per
+     distinguersi a colpo d'occhio dalla Dashboard Live (ambra/teal).
+     Stesso sfondo neutro condiviso tra i due strumenti del progetto.
+     ================================================================ */
   :root {
     --bg: #14171c;
     --bg-panel: #1c2029;
     --bg-flap: #0e1015;
     --rule: #2a2f3a;
-    --amber: #f0b429;
-    --amber-dim: #a8801f;
+    --viola: #a78bfa;
+    --viola-dim: #6d5bd0;
     --text: #e8e6df;
     --text-muted: #7d828c;
     --red: #e2574c;
@@ -27,7 +35,7 @@
   body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
   .wrap { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 3rem; }
   header { padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; }
-  .titolo { font-family: var(--font-mono); font-weight: 700; font-size: 1.4rem; letter-spacing: 0.02em; color: var(--amber); display: flex; align-items: baseline; gap: 0.5rem; }
+  .titolo { font-family: var(--font-mono); font-weight: 700; font-size: 1.3rem; letter-spacing: 0.02em; color: var(--viola); display: flex; align-items: baseline; gap: 0.5rem; }
   .titolo .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: pulse 2.4s ease-in-out infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   .sottotitolo { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.3rem; font-family: var(--font-mono); }
@@ -37,12 +45,12 @@
   .campo.full { grid-column: 1 / -1; }
   .campo label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 500; }
   select, input[type="time"] { background: var(--bg-flap); border: 1px solid var(--rule); color: var(--text); font-family: var(--font-mono); font-size: 0.9rem; padding: 0.5rem 0.6rem; border-radius: 6px; width: 100%; }
-  select:focus, input:focus { outline: 2px solid var(--amber-dim); outline-offset: 1px; }
+  select:focus, input:focus { outline: 2px solid var(--viola-dim); outline-offset: 1px; }
   .orario-range { display: flex; gap: 0.5rem; align-items: center; }
   .orario-range span { color: var(--text-muted); font-size: 0.8rem; }
   .azioni { display: flex; gap: 0.6rem; margin-top: 1rem; }
   button { font-family: var(--font-sans); font-weight: 600; font-size: 0.85rem; padding: 0.6rem 1rem; border-radius: 6px; border: none; cursor: pointer; flex: 1; }
-  .btn-cerca { background: var(--amber); color: #1a1400; }
+  .btn-cerca { background: var(--viola); color: #1a1035; }
   .btn-cerca:active { transform: scale(0.98); }
   .btn-reset { background: transparent; color: var(--text-muted); border: 1px solid var(--rule); }
   .riepilogo { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem; min-height: 1.2rem; }
@@ -55,7 +63,7 @@
   .flap.rit-neg { color: var(--green); }
   .flap.rit-zero { color: var(--text-muted); }
   .flap.rit-pos { color: var(--red); }
-  .num-treno { font-family: var(--font-mono); color: var(--amber); font-weight: 700; }
+  .num-treno { font-family: var(--font-mono); color: var(--viola); font-weight: 700; }
   .stazione-cell { color: var(--text); font-size: 0.8rem; }
   .vuoto, .loading, .errore { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.85rem; }
   .errore { color: var(--red); }
@@ -69,7 +77,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="titolo"><span class="dot"></span>MONITOR TRENI</div>
+    <div class="titolo"><span class="dot"></span>MONITOR TRENI · STATISTICHE</div>
     <div class="sottotitolo" id="ultimoAggiornamento">Caricamento stato...</div>
   </header>
 
@@ -122,6 +130,10 @@
 </div>
 
 <script>
+// ================================================================
+// dashboard.html — v2.1 (2026-08-11)
+// Novità v2.1: identità viola per distinguere questa dashboard
+// (Statistiche) da dashboard_live.html (ambra/teal). Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE — queste due righe sono le UNICHE da controllare
 // ================================================================
@@ -219,7 +231,7 @@ function disegnaGrafico(data) {
       labels: filtrati.map(r => `${r.numero_treno}`),
       datasets: [{
         data: filtrati.map(r => r.ritardo_medio_partenza),
-        backgroundColor: filtrati.map(r => r.ritardo_medio_partenza > 3 ? '#e2574c' : r.ritardo_medio_partenza > 0 ? '#f0b429' : '#4caf7d'),
+        backgroundColor: filtrati.map(r => r.ritardo_medio_partenza > 3 ? '#e2574c' : r.ritardo_medio_partenza > 0 ? '#a78bfa' : '#4caf7d'),
         borderRadius: 3,
       }]
     },
