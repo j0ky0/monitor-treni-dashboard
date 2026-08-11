@@ -207,16 +207,6 @@
   </div>
   <div class="rfi-link-esterno" id="rfiLinkEsterno"></div>
 
-  <div id="trenoPannello" style="display:none;">
-    <div class="tracking-header">
-      <div class="titolo-tracking">Treno <b id="trenoDettaglioLabel"></b></div>
-      <button onclick="chiudiDettaglioTreno()">✕ Chiudi</button>
-    </div>
-    <div class="tracking-list-wrap">
-      <div id="trenoDettaglioEl"><div class="loading">Caricamento...</div></div>
-    </div>
-  </div>
-
   <div id="vistaClassicaWrap" style="display:none;">
     <div class="section-label mod-treni">🚆 Treni — tabellone ViaggiaTreno (vista classica)</div>
     <div class="treno-list-wrap">
@@ -233,9 +223,10 @@
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.2 (2026-08-11)
-// Novità v1.2: colori distinti per modulo (ambra=Treni, teal=Bus),
-// distinti anche dalla Dashboard Statistiche (viola). Vedi CHANGELOG.md.
+// dashboard_live.html — v1.3 (2026-08-11)
+// Novità v1.3: click su numero treno apre dettaglio_treno.html in
+// nuova scheda (percorso completo, orari teorici/reali, ritardi) al
+// posto dell'overlay in pagina. Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -328,7 +319,6 @@ const STAZIONI_TRENI = [
 let stazioneAttiva = STAZIONI_TRENI[1];
 let modalitaAttiva = 'partenze';
 let vistaClassicaAperta = false;
-let trenoDettaglioApertoNum = null;
 
 // Stato tracciamento vettura: null = pannello normale, stringa = matricola tracciata
 let vetturaTracciata = null;
@@ -565,7 +555,7 @@ async function caricaTreniRFI() {
         <div class="treno-row">
           <div class="treno-sx">
             <div class="treno-num-riga">
-              <button class="treno-num" onclick="apriDettaglioTreno('${t.numeroTreno}')">${t.numeroTreno}</button>
+              <a class="treno-num" href="dettaglio_treno.html?numero=${t.numeroTreno}" target="_blank" rel="noopener">${t.numeroTreno}</a>
               <span class="treno-cat">${t.operatore || ''} ${t.categoria || ''}</span>
             </div>
             <div class="treno-dest">${t.stazione || '—'}</div>
@@ -588,63 +578,6 @@ function toggleVistaClassica() {
   document.getElementById('vistaClassicaWrap').style.display = vistaClassicaAperta ? 'block' : 'none';
   document.getElementById('btnVistaClassica').textContent = vistaClassicaAperta ? 'Vista classica ▴' : 'Vista classica ▾';
   if (vistaClassicaAperta) caricaTreni();
-}
-
-function apriDettaglioTreno(numeroTreno) {
-  trenoDettaglioApertoNum = numeroTreno;
-  document.getElementById('trenoDettaglioLabel').textContent = numeroTreno;
-  document.getElementById('trenoPannello').style.display = 'block';
-  caricaDettaglioTreno();
-}
-
-function chiudiDettaglioTreno() {
-  trenoDettaglioApertoNum = null;
-  document.getElementById('trenoPannello').style.display = 'none';
-}
-
-async function caricaDettaglioTreno() {
-  const el = document.getElementById('trenoDettaglioEl');
-  el.innerHTML = '<div class="loading">Caricamento dettaglio...</div>';
-
-  try {
-    const risposta = await fetch(`${DENO_URL}/treno/${encodeURIComponent(trenoDettaglioApertoNum)}`);
-    const json = await risposta.json();
-
-    if (json.errore) {
-      el.innerHTML = `<div class="vuoto">${json.errore}</div>`;
-      return;
-    }
-
-    // Rendering difensivo: campi comuni se presenti, altrimenti dump leggibile.
-    // NOTA: da rifinire una volta verificata la struttura reale della risposta.
-    const campiNoti = ['stazionePartenza', 'stazioneArrivo', 'orarioPartenza', 'orarioArrivo',
-      'ritardo', 'stato', 'binarioProgrammato', 'binarioEffettivo', 'ultimoRilevamento'];
-    const righeNote = campiNoti
-      .filter(k => json[k] !== undefined && json[k] !== null)
-      .map(k => `<div class="treno-dettaglio-row"><div class="k">${k}</div><div class="v">${json[k]}</div></div>`)
-      .join('');
-
-    const fermate = Array.isArray(json.fermate) ? json.fermate : [];
-    const righeFermate = fermate.map(f => `
-      <div class="tracking-row">
-        <div class="tracking-sx">
-          <div class="tracking-nome">${f.stazione || f.nome || '—'}</div>
-        </div>
-        <div class="tracking-dx">
-          <div class="tracking-relativo">${f.orario || f.orarioProgrammato || '—'}</div>
-          ${f.ritardo !== undefined ? `<div class="tracking-assoluto">${f.ritardo > 0 ? '+' : ''}${f.ritardo}'</div>` : ''}
-        </div>
-      </div>`).join('');
-
-    if (righeNote || righeFermate) {
-      el.innerHTML = righeNote + righeFermate;
-    } else {
-      el.innerHTML = `<div class="treno-dettaglio-row"><pre style="white-space:pre-wrap;margin:0;font-size:0.72rem;color:var(--text-muted);">${JSON.stringify(json, null, 2)}</pre></div>`;
-    }
-
-  } catch (errore) {
-    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
-  }
 }
 
 // ================================================================
@@ -751,7 +684,6 @@ function aggiornaTutto() {
   }
   caricaTreniRFI();
   if (vistaClassicaAperta) caricaTreni();
-  if (trenoDettaglioApertoNum) caricaDettaglioTreno();
 }
 
 aggiornaOra();
