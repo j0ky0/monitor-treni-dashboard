@@ -10,15 +10,17 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.4 (2026-08-11)
+     dashboard_live.html — v1.5 (2026-08-12)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
      Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
-     Novità v1.4: pallino lampeggiante "in partenza/in arrivo" nel
-     Monitor RFI (campo inArrivo già estratto dal parser Deno).
+     Novità v1.5: fermata di riferimento "battezzabile" (pin) nel
+     modulo Bus — tap sulla card per tracciare la vettura (già
+     esistente), ora con persistenza in localStorage per entrambi
+     (fermata pinnata + vettura tracciata), sopravvive al refresh.
      ================================================================ */
   :root {
     --bg: #14171c;
@@ -57,6 +59,18 @@
   .ricerca-vettura input { flex: 1; background: var(--bg-flap); border: 1px solid var(--rule); color: var(--text); font-family: var(--font-mono); font-size: 0.85rem; padding: 8px 10px; border-radius: 6px; }
   .ricerca-vettura input::placeholder { color: var(--text-muted); }
   .ricerca-vettura button { background: var(--teal); color: #04201d; border: none; font-weight: 600; font-size: 0.8rem; padding: 8px 14px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+
+  /* --- Fermata di riferimento pinnata (modulo Bus) --- */
+  .fermata-chips { display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; }
+  .fermata-chips::-webkit-scrollbar { display: none; }
+  .fermata-chip { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-family: var(--font-sans); }
+  .fermata-chip .nome { font-size: 0.76rem; color: var(--text); white-space: nowrap; }
+  .fermata-chip .linee { font-size: 0.62rem; color: var(--text-muted); font-family: var(--font-mono); }
+  .fermata-chip.on { background: rgba(45,212,175,0.12); border-color: var(--teal-dim); }
+  .fermata-chip.on .nome { color: var(--teal); font-weight: 600; }
+  .fermata-pin-attiva { display: flex; justify-content: space-between; align-items: center; background: rgba(45,212,175,0.08); border: 1px solid var(--teal-dim); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.8rem; }
+  .fermata-pin-attiva b { color: var(--teal); }
+  .fermata-pin-attiva button { background: none; border: 1px solid var(--rule); color: var(--text-muted); font-size: 0.7rem; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
 
   /* --- Filtro doppio Bus: riga Andata/Ritorno + riga DD/LL --- */
   .bus-filtri { margin-bottom: 12px; }
@@ -173,6 +187,12 @@
     <button onclick="avviaTracciamentoDaInput()">Traccia</button>
   </div>
 
+  <div id="fermataPinAttivaWrap"></div>
+
+  <div id="fermataChipsWrap">
+    <div class="fermata-chips" id="fermataChips"></div>
+  </div>
+
   <div id="busPannelloNormale">
     <div class="bus-filtri" id="busFiltri">
       <div class="riga-filtro">
@@ -227,9 +247,9 @@
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.4 (2026-08-11)
-// Novità v1.4: pallino lampeggiante "in partenza/in arrivo" nel
-// Monitor RFI (campo inArrivo del parser Deno). Vedi CHANGELOG.md.
+// dashboard_live.html — v1.5 (2026-08-12)
+// Novità v1.5: fermata di riferimento pinnata (bus) + persistenza
+// localStorage per fermata pinnata e vettura tracciata. Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -273,6 +293,92 @@ const TRATTE_BUS = TRATTE_BUS_RAW.map((t, i) => {
 // Set di stopId che sono partenza o arrivo di ALMENO una tratta —
 // usato per evidenziare le "fermate abituali" nel tracciamento vettura
 const FERMATE_ABITUALI = new Set(TRATTE_BUS.flatMap(t => [t.partenza, t.arrivo]));
+
+// ----------------------------------------------------------------
+// Fermate uniche per il picker "battezza fermata" — deduplica per
+// stopId, raccoglie le linee che ci passano (una fermata fisica può
+// essere condivisa da più linee, es. Fiume: 490 direzione ritorno e
+// 80/38 direzione andata).
+// ----------------------------------------------------------------
+const FERMATE_UNICHE_MAP = new Map();
+TRATTE_BUS.forEach(t => {
+  [{ stopId: t.partenza, nome: t.nomePartenza }, { stopId: t.arrivo, nome: t.nomeArrivo }].forEach(f => {
+    if (!FERMATE_UNICHE_MAP.has(f.stopId)) {
+      FERMATE_UNICHE_MAP.set(f.stopId, { stopId: f.stopId, nome: f.nome, linee: new Set() });
+    }
+    FERMATE_UNICHE_MAP.get(f.stopId).linee.add(t.linea);
+  });
+});
+const FERMATE_UNICHE = Array.from(FERMATE_UNICHE_MAP.values())
+  .map(f => ({ ...f, linee: Array.from(f.linee).sort() }))
+  .sort((a, b) => a.nome.localeCompare(b.nome));
+
+// ----------------------------------------------------------------
+// Fermata di riferimento pinnata — persistita in localStorage cosi'
+// resta impostata anche dopo un refresh o riapertura della pagina.
+// A differenza dei filtri Direzione/Gruppo, quando e' attiva mostra
+// SOLO i bus che passano per quella fermata specifica (qualunque
+// linea/direzione), pensata per l'uso "sono a questa fermata ora".
+// ----------------------------------------------------------------
+let fermataPinnata = null;
+
+function salvaFermataPinnata() {
+  try {
+    if (fermataPinnata) localStorage.setItem('monitorLive.fermataPinnata', JSON.stringify(fermataPinnata));
+    else localStorage.removeItem('monitorLive.fermataPinnata');
+  } catch {}
+}
+
+function caricaFermataPinnataDaStorage() {
+  try {
+    const grezzo = localStorage.getItem('monitorLive.fermataPinnata');
+    if (grezzo) fermataPinnata = JSON.parse(grezzo);
+  } catch {}
+}
+
+function pinFermata(stopId) {
+  const f = FERMATE_UNICHE.find(x => x.stopId === stopId);
+  if (!f) return;
+  fermataPinnata = f;
+  salvaFermataPinnata();
+  renderFermataPin();
+  caricaBus();
+}
+
+function rimuoviFermataPin() {
+  fermataPinnata = null;
+  salvaFermataPinnata();
+  renderFermataPin();
+  caricaBus();
+}
+
+function renderFermataChips() {
+  document.getElementById('fermataChips').innerHTML = FERMATE_UNICHE.map(f => `
+    <div class="fermata-chip" onclick="pinFermata('${f.stopId}')">
+      <span class="nome">${f.nome}</span>
+      <span class="linee">${f.linee.join(' · ')}</span>
+    </div>`).join('');
+}
+
+function renderFermataPin() {
+  const wrapAttiva = document.getElementById('fermataPinAttivaWrap');
+  const wrapChips = document.getElementById('fermataChipsWrap');
+  const filtri = document.getElementById('busFiltri');
+
+  if (fermataPinnata) {
+    wrapAttiva.innerHTML = `
+      <div class="fermata-pin-attiva">
+        <span>📍 Fermata: <b>${fermataPinnata.nome}</b></span>
+        <button onclick="rimuoviFermataPin()">Cambia</button>
+      </div>`;
+    wrapChips.style.display = 'none';
+    filtri.style.display = 'none';
+  } else {
+    wrapAttiva.innerHTML = '';
+    wrapChips.style.display = 'block';
+    filtri.style.display = 'block';
+  }
+}
 
 // Stato filtro doppio: Direzione (sempre uno attivo) + Gruppo
 let direzioneAttiva = 'ritorno';
@@ -367,14 +473,20 @@ async function caricaBus() {
 
     const ora = Date.now() / 1000;
     const corse = [];
-    const tratte = tratteFiltrate();
+    const tratte = fermataPinnata
+      ? TRATTE_BUS.filter(t => t.partenza === fermataPinnata.stopId || t.arrivo === fermataPinnata.stopId)
+      : tratteFiltrate();
 
     for (const trip of json.dati) {
       const tratteLinea = tratte.filter(t => String(t.linea) === String(trip.routeId));
       if (tratteLinea.length === 0) continue;
 
       for (const tratta of tratteLinea) {
-        const stopPartenza = trip.stopTimeUpdates.find(s => s.stopId === tratta.partenza);
+        // Con fermata pinnata, il riferimento orario e' la fermata
+        // scelta (che puo' essere partenza O arrivo della tratta);
+        // senza pin, resta il comportamento originale (partenza tratta).
+        const stopRiferimento = fermataPinnata ? fermataPinnata.stopId : tratta.partenza;
+        const stopPartenza = trip.stopTimeUpdates.find(s => s.stopId === stopRiferimento);
         const stopArrivo = trip.stopTimeUpdates.find(s => s.stopId === tratta.arrivo);
         if (!stopPartenza) continue;
 
@@ -449,6 +561,34 @@ async function caricaBus() {
 // ================================================================
 // TRACCIAMENTO VETTURA SPECIFICA
 // ================================================================
+// Persistenza tracciamento vettura: sopravvive al refresh della
+// pagina. Scade dopo 3 ore per non ripristinare tracciamenti di
+// vetture ormai fuori servizio da giorni (le matricole si riusano).
+const SCADENZA_TRACCIAMENTO_MS = 3 * 60 * 60 * 1000;
+
+function salvaVetturaTracciata(matricola) {
+  try {
+    localStorage.setItem('monitorLive.vetturaTracciata', JSON.stringify({ matricola, salvataIl: Date.now() }));
+  } catch {}
+}
+
+function rimuoviVetturaTracciataSalvata() {
+  try { localStorage.removeItem('monitorLive.vetturaTracciata'); } catch {}
+}
+
+function caricaVetturaTracciataDaStorage() {
+  try {
+    const grezzo = localStorage.getItem('monitorLive.vetturaTracciata');
+    if (!grezzo) return null;
+    const dati = JSON.parse(grezzo);
+    if (Date.now() - dati.salvataIl > SCADENZA_TRACCIAMENTO_MS) {
+      rimuoviVetturaTracciataSalvata();
+      return null;
+    }
+    return dati.matricola;
+  } catch { return null; }
+}
+
 function avviaTracciamentoDaInput() {
   const valore = document.getElementById('inputMatricola').value.trim();
   if (!valore) return;
@@ -457,6 +597,7 @@ function avviaTracciamentoDaInput() {
 
 function avviaTracciamento(matricola) {
   vetturaTracciata = matricola;
+  salvaVetturaTracciata(matricola);
   document.getElementById('inputMatricola').value = matricola;
   document.getElementById('trackingMatricolaLabel').textContent = matricola;
   document.getElementById('busPannelloNormale').style.display = 'none';
@@ -466,6 +607,7 @@ function avviaTracciamento(matricola) {
 
 function chiudiTracciamento() {
   vetturaTracciata = null;
+  rimuoviVetturaTracciataSalvata();
   document.getElementById('busPannelloNormale').style.display = 'block';
   document.getElementById('vetturaPannello').style.display = 'none';
   caricaBus();
@@ -697,7 +839,21 @@ renderFiltriBus();
 renderTabsStazioni();
 renderTogglePA();
 aggiornaLinkRfi();
-caricaBus();
+
+// Ripristino stato salvato (fermata pinnata + eventuale tracciamento
+// vettura in corso) prima del primo caricamento, cosi' la pagina
+// riapre esattamente dove l'avevi lasciata.
+caricaFermataPinnataDaStorage();
+renderFermataChips();
+renderFermataPin();
+
+const matricolaSalvata = caricaVetturaTracciataDaStorage();
+if (matricolaSalvata) {
+  avviaTracciamento(matricolaSalvata);
+} else {
+  caricaBus();
+}
+
 caricaTreniRFI();
 setInterval(aggiornaOra, 30000);
 </script>
