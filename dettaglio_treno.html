@@ -98,7 +98,9 @@
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.0 (2026-08-11)
+// dettaglio_treno.html — v1.1 (2026-08-11)
+// Novità v1.1: distinzione "Transito" (futuro) / "Transitato" (già
+// passato) sulle fermate intermedie. Vedi CHANGELOG.md.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
@@ -185,7 +187,15 @@ function renderPercorso(json) {
     const isOrigine = i === 0;
     const isDestinazione = i === fermate.length - 1;
     const tipo = isOrigine ? 'origine' : isDestinazione ? 'destinazione' : '';
-    const tipoLabel = isOrigine ? 'Partenza' : isDestinazione ? 'Arrivo' : 'Transito';
+
+    // Per le fermate intermedie, distinguiamo se il treno e' gia' transitato
+    // o deve ancora passare, confrontando l'orario di partenza (o arrivo se
+    // e' l'ultima fermata prima della destinazione) con l'ora attuale.
+    let tipoLabel = isOrigine ? 'Partenza' : isDestinazione ? 'Arrivo' : 'Transito';
+    if (!isOrigine && !isDestinazione) {
+      const epocaRiferimento = f.partenzaReale || f.partenza_teorica || f.arrivoReale || f.arrivo_teorico;
+      if (epocaRiferimento && epocaRiferimento < Date.now()) tipoLabel = 'Transitato';
+    }
 
     const binario = f.binarioEffettivoArrivoDescrizione || f.binarioProgrammatoArrivoDescrizione
       || f.binarioEffettivoPartenzaDescrizione || f.binarioProgrammatoPartenzaDescrizione;
