@@ -10,13 +10,16 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.5 (2026-08-12)
+     dashboard_live.html — v1.6 (2026-08-14)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
      Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
+     Novità v1.6: nomi fermate bus risolti da stops.txt (GTFS statico,
+     nome grande + numero fermata piccolo) al posto del generico
+     "Fermata {numero}"; versione visibile in footer.
      Novità v1.5: fermata di riferimento "battezzabile" (pin) nel
      modulo Bus — tap sulla card per tracciare la vettura (già
      esistente), ora con persistenza in localStorage per entrambi
@@ -240,16 +243,16 @@
 
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
-    Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico
+    Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
+    <span style="opacity:0.6">dashboard_live.html v1.6</span>
   </footer>
 
 </div>
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.5 (2026-08-12)
-// Novità v1.5: fermata di riferimento pinnata (bus) + persistenza
-// localStorage per fermata pinnata e vettura tracciata. Vedi CHANGELOG.md.
+// dashboard_live.html — v1.6 (2026-08-14)
+// Novità v1.6: nomi fermate da stops.txt, versione in footer. Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -613,6 +616,47 @@ function chiudiTracciamento() {
   caricaBus();
 }
 
+// ================================================================
+// Mappa nomi fermate ATAC da stops.txt (GTFS statico) — risolve i
+// "Fermata {numero}" generici del feed real-time con il nome vero,
+// per le fermate che il feed non etichetta gia' da solo.
+// File atteso nello stesso repo/percorso di questa pagina.
+// ================================================================
+function parseRigaCsv(riga) {
+  const risultato = [];
+  let corrente = '';
+  let dentroVirgolette = false;
+  for (let i = 0; i < riga.length; i++) {
+    const c = riga[i];
+    if (c === '"') { dentroVirgolette = !dentroVirgolette; continue; }
+    if (c === ',' && !dentroVirgolette) { risultato.push(corrente); corrente = ''; continue; }
+    corrente += c;
+  }
+  risultato.push(corrente);
+  return risultato;
+}
+
+async function caricaMappaFermate() {
+  const mappa = new Map();
+  try {
+    const risposta = await fetch('stops.txt');
+    if (!risposta.ok) return mappa;
+    const testo = await risposta.text();
+    const righe = testo.split('\n');
+    for (let i = 1; i < righe.length; i++) {
+      if (!righe[i].trim()) continue;
+      const campi = parseRigaCsv(righe[i]);
+      const stopId = (campi[0] || '').trim();
+      const nome = (campi[2] || '').trim();
+      if (stopId && nome) mappa.set(stopId, nome);
+    }
+  } catch {
+    // stops.txt non disponibile: si torna al fallback "Fermata {numero}"
+  }
+  return mappa;
+}
+const MAPPA_FERMATE_PROMISE = caricaMappaFermate();
+
 async function caricaVettura() {
   const el = document.getElementById('trackingEl');
   el.innerHTML = '<div class="loading">Ricerca vettura in corso...</div>';
@@ -633,9 +677,10 @@ async function caricaVettura() {
     }
 
     const ora = Date.now() / 1000;
+    const mappaFermate = await MAPPA_FERMATE_PROMISE;
 
     el.innerHTML = fermate.map(f => {
-      const nome = f.nomeFermata || `Fermata ${f.stopId}`;
+      const nome = f.nomeFermata || mappaFermate.get(f.stopId) || `Fermata ${f.stopId}`;
       const evidenziata = FERMATE_ABITUALI.has(f.stopId);
       const minutiAttesa = f.arrivalTime ? (f.arrivalTime - ora) / 60 : null;
       const relativo = minutiAttesa !== null ? fmtMin(minutiAttesa) : '—';
@@ -645,7 +690,7 @@ async function caricaVettura() {
         <div class="tracking-row ${evidenziata ? 'evidenziata' : ''}">
           <div class="tracking-sx">
             <div class="tracking-nome">${nome}</div>
-            <div class="tracking-seq">seq. ${f.stopSequence ?? '—'}</div>
+            <div class="tracking-seq">seq. ${f.stopSequence ?? '—'} · #${f.stopId}</div>
           </div>
           <div class="tracking-dx">
             <div class="tracking-relativo">${relativo}</div>
