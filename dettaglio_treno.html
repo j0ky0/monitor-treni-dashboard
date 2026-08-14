@@ -10,12 +10,17 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_treno.html — v1.0 (2026-08-11)
+     dettaglio_treno.html — v1.2 (2026-08-14)
      Pagina standalone: percorso completo di un treno (tutte le
      fermate, orari teorici/reali, ritardi, binari). Aperta in nuova
      scheda dal click sul numero treno nel Monitor RFI.
      Dati da: DENO_URL/treno/{numero} (proxy ViaggiaTreno andamentoTreno).
      Stessa identità cromatica (ambra) del modulo Treni di dashboard_live.html.
+     Novità v1.2: rilevazione cancellazione corretta (subTitle/nonPartito,
+     non solo circolante), causa ritardo se disponibile, ultimo
+     rilevamento GPS (anche fuori stazione), versione visibile in footer.
+     Novità v1.1: distinzione "Transito"/"Transitato" sulle fermate
+     intermedie (confronto orario con Date.now()).
      ================================================================ */
   :root {
     --bg: #14171c;
@@ -46,6 +51,8 @@
   .treno-header .tratta b { font-weight: 600; }
   .treno-header .stato-riga { display: flex; gap: 14px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 0.78rem; color: var(--text-muted); flex-wrap: wrap; }
   .treno-header .stato-riga b { color: var(--text); font-family: var(--font-mono); }
+  .treno-header .motivo-riga { margin-top: 8px; font-size: 0.76rem; color: var(--text-muted); font-style: italic; }
+  .treno-header .rilevamento-riga { margin-top: 6px; font-size: 0.72rem; color: var(--text-muted); }
   .badge-non-circolante { display: inline-block; background: rgba(226,87,76,0.15); color: var(--red); font-size: 0.7rem; font-weight: 700; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; margin-top: 8px; }
 
   .section-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 1.5rem 0 0.6rem; padding-left: 8px; border-left: 3px solid var(--amber-dim); }
@@ -80,7 +87,8 @@
   .dump-grezzo summary { font-size: 0.72rem; color: var(--text-muted); cursor: pointer; }
   .dump-grezzo pre { white-space: pre-wrap; font-size: 0.7rem; color: var(--text-muted); background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 8px; padding: 10px; margin-top: 8px; max-height: 400px; overflow-y: auto; }
 
-  footer { text-align: center; font-size: 0.68rem; color: var(--text-muted); margin-top: 2rem; font-family: var(--font-mono); }
+  footer { text-align: center; font-size: 0.68rem; color: var(--text-muted); margin-top: 2rem; font-family: var(--font-mono); line-height: 1.7; }
+  .footer-rev { opacity: 0.6; }
 </style>
 </head>
 <body>
@@ -93,14 +101,16 @@
   <div class="section-label">📍 Percorso completo</div>
   <div class="percorso-wrap" id="percorsoEl"><div class="loading">Caricamento fermate...</div></div>
 
-  <footer>Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI</footer>
+  <footer>
+    Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI<br>
+    <span class="footer-rev">dettaglio_treno.html v1.2</span>
+  </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.1 (2026-08-11)
-// Novità v1.1: distinzione "Transito" (futuro) / "Transitato" (già
-// passato) sulle fermate intermedie. Vedi CHANGELOG.md.
+// dettaglio_treno.html — v1.2 (2026-08-14)
+// Vedi commento di versione nel <style> per il changelog completo.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
@@ -149,9 +159,26 @@ function renderHeader(json) {
   const categoria = json.categoria || json.tipoTreno || '';
   const oraPartenza = formattaOrario(json.orarioPartenza);
   const oraArrivo = formattaOrario(json.orarioArrivo);
-  const ritardoAttuale = (json.ritardo !== undefined && json.ritardo !== null) ? json.ritardo
-    : (json.compRitardo !== undefined ? json.compRitardo : null);
+  const ritardoAttuale = (json.ritardo !== undefined && json.ritardo !== null) ? json.ritardo : null;
+
+  // FIX v1.2: "circolante" indica se il treno esiste in orario, NON se
+  // la corsa di oggi e' stata cancellata. Verificato su dato reale:
+  // un treno cancellato oggi aveva comunque circolante:true. Il segnale
+  // vero e' subTitle === "Treno cancellato" (o nonPartito / provvedimento).
+  const cancellato = json.subTitle === 'Treno cancellato' || json.nonPartito === true;
   const nonCircolante = json.circolante === false;
+
+  // Causa del ritardo: spesso null anche su treni in ritardo (limite
+  // noto dell'API ViaggiaTreno, non del nostro parser) — mostrato solo
+  // se effettivamente valorizzato.
+  const motivoRitardo = json.motivoRitardoPrevalente;
+
+  // Ultimo rilevamento GPS: valido anche quando il treno e' tra due
+  // stazioni, non solo quando e' fermo a una fermata programmata.
+  const ultimoRilevamentoStazione = json.stazioneUltimoRilevamento;
+  const ultimoRilevamentoOra = json.compOraUltimoRilevamento;
+  const mostraUltimoRilevamento = ultimoRilevamentoStazione && ultimoRilevamentoStazione !== '--'
+    && ultimoRilevamentoOra && ultimoRilevamentoOra !== '--';
 
   el.innerHTML = `
     <div class="treno-header">
@@ -160,12 +187,15 @@ function renderHeader(json) {
         <span class="categoria">${categoria}</span>
       </div>
       <div class="tratta"><b>${origine}</b> → <b>${destinazione}</b></div>
-      ${nonCircolante ? '<div class="badge-non-circolante">Non in circolazione oggi</div>' : ''}
+      ${cancellato ? '<div class="badge-non-circolante">Treno cancellato</div>' : ''}
+      ${!cancellato && nonCircolante ? '<div class="badge-non-circolante">Non in circolazione oggi</div>' : ''}
       <div class="stato-riga">
         ${oraPartenza ? `<span>Partenza <b>${oraPartenza}</b></span>` : ''}
         ${oraArrivo ? `<span>Arrivo <b>${oraArrivo}</b></span>` : ''}
-        ${ritardoAttuale !== null ? `<span>Ritardo attuale ${formattaRitardo(ritardoAttuale)}</span>` : ''}
+        ${!cancellato && ritardoAttuale !== null ? `<span>Ritardo attuale ${formattaRitardo(ritardoAttuale)}</span>` : ''}
       </div>
+      ${motivoRitardo ? `<div class="motivo-riga">Causa: ${motivoRitardo}</div>` : ''}
+      ${mostraUltimoRilevamento ? `<div class="rilevamento-riga">📡 Ultimo rilevamento: <b style="color:var(--text)">${ultimoRilevamentoStazione}</b> alle ${ultimoRilevamentoOra}</div>` : ''}
     </div>`;
 }
 
