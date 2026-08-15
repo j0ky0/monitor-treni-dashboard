@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#14171c">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>">
+<title>Dettaglio bus — Monitor Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ================================================================
+     dettaglio_bus.html — v1.0 (2026-08-15)
+     Pagina standalone: tracciamento di una vettura specifica in
+     nuova scheda, gemella di dettaglio_treno.html ma per il modulo
+     Bus (tema teal). Si AGGIUNGE al pannello di tracciamento in
+     pagina (che resta il comportamento principale) — non lo sostituisce.
+     Dati da: WORKER_URL/vettura/{matricola}.
+     ================================================================ */
+  :root {
+    --bg: #14171c;
+    --bg-panel: #1c2029;
+    --bg-flap: #0e1015;
+    --rule: #2a2f3a;
+    --teal: #2dd4bf;
+    --teal-dim: #1f8f82;
+    --text: #e8e6df;
+    --text-muted: #7d828c;
+    --red: #e2574c;
+    --green: #4caf7d;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+
+  header { padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; }
+  .btn-indietro { background: none; border: none; color: var(--text-muted); font-size: 0.8rem; padding: 0; cursor: pointer; font-family: var(--font-sans); margin-bottom: 10px; }
+
+  .bus-header { background: var(--bg-panel); border: 1px solid var(--teal-dim); border-radius: 12px; padding: 1rem; }
+  .bus-header-top { display: flex; align-items: baseline; gap: 10px; }
+  .bus-header .matricola { font-family: var(--font-mono); font-weight: 700; font-size: 1.5rem; color: var(--teal); }
+  .bus-header .linea { font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; }
+  .bus-header .occupancy-riga { margin-top: 8px; font-size: 0.8rem; }
+  .bus-header .occupancy-riga b { color: var(--teal); }
+
+  .section-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 1.5rem 0 0.6rem; padding-left: 8px; border-left: 3px solid var(--teal-dim); }
+
+  .tracking-list-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+  .tracking-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--rule); gap: 8px; }
+  .tracking-row:last-child { border-bottom: none; }
+  .tracking-sx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .tracking-nome { font-size: 0.82rem; color: var(--text); }
+  .tracking-seq { font-size: 0.68rem; color: var(--text-muted); font-family: var(--font-mono); }
+  .tracking-dx { text-align: right; flex-shrink: 0; }
+  .tracking-relativo { font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem; color: var(--text); }
+  .tracking-assoluto { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
+
+  .loading, .vuoto, .errore { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.85rem; }
+  .errore { color: var(--red); }
+
+  footer { text-align: center; font-size: 0.68rem; color: var(--text-muted); margin-top: 2rem; font-family: var(--font-mono); line-height: 1.7; }
+  .footer-rev { opacity: 0.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <button class="btn-indietro" onclick="window.close()">← Chiudi scheda</button>
+  <header>
+    <div id="busHeaderEl"><div class="loading">Caricamento vettura...</div></div>
+  </header>
+
+  <div class="section-label">📍 Fermate future</div>
+  <div class="tracking-list-wrap" id="fermateEl"><div class="loading">Caricamento fermate...</div></div>
+
+  <footer>
+    Dati ATAC/Roma Mobilita' (via proxy Cloudflare) · pagina generata dal tap sulla card bus<br>
+    <span class="footer-rev">dettaglio_bus.html v1.0</span>
+  </footer>
+</div>
+
+<script>
+// ================================================================
+// dettaglio_bus.html — v1.0 (2026-08-15)
+// ================================================================
+const WORKER_URL = 'https://fragrant-shape-56bd.zargonabio.workers.dev';
+
+const ETICHETTE_OCCUPANCY = {
+  0: 'Vuoto', 1: 'Posti disponibili', 2: 'Pochi posti', 3: 'Solo in piedi',
+  4: 'Molto affollato', 5: 'Pieno', 6: 'Non accetta passeggeri',
+  7: 'Dato non disponibile', 8: 'Non salibile',
+};
+
+const params = new URLSearchParams(window.location.search);
+const matricola = params.get('matricola');
+
+function fmtOrarioAssoluto(epochSecondi) {
+  if (!epochSecondi) return '—';
+  return new Date(epochSecondi * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtMin(min) {
+  if (min === null || min === undefined) return '—';
+  const arrotondato = Math.round(min);
+  if (arrotondato <= 0) return 'ora';
+  return `${arrotondato}'`;
+}
+
+async function caricaDettaglioBus() {
+  if (!matricola) {
+    document.getElementById('busHeaderEl').innerHTML = '<div class="errore">Nessuna matricola specificata nell\'URL (manca ?matricola=...)</div>';
+    document.getElementById('fermateEl').innerHTML = '';
+    return;
+  }
+
+  try {
+    const risposta = await fetch(`${WORKER_URL}/vettura/${encodeURIComponent(matricola)}`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      document.getElementById('busHeaderEl').innerHTML = `<div class="errore">${json.errore}</div>`;
+      document.getElementById('fermateEl').innerHTML = '';
+      return;
+    }
+
+    const occupancyTesto = json.occupancyLabel || (ETICHETTE_OCCUPANCY[json.occupancyStatus] || null);
+
+    document.getElementById('busHeaderEl').innerHTML = `
+      <div class="bus-header">
+        <div class="bus-header-top">
+          <span class="matricola">${json.vehicleLabel || matricola}</span>
+          <span class="linea">Linea ${json.routeId || '—'}</span>
+        </div>
+        ${occupancyTesto ? `<div class="occupancy-riga">Affollamento: <b>${occupancyTesto}</b></div>` : ''}
+      </div>`;
+
+    const fermate = Array.isArray(json.stopTimeUpdates) ? json.stopTimeUpdates : [];
+    const ora = Date.now() / 1000;
+
+    if (fermate.length === 0) {
+      document.getElementById('fermateEl').innerHTML = '<div class="vuoto">Nessuna fermata futura disponibile per questa corsa.</div>';
+      return;
+    }
+
+    document.getElementById('fermateEl').innerHTML = fermate.map(f => {
+      const nome = f.nomeFermata || `Fermata ${f.stopId}`;
+      const minutiAttesa = f.arrivalTime ? (f.arrivalTime - ora) / 60 : null;
+      return `
+        <div class="tracking-row">
+          <div class="tracking-sx">
+            <div class="tracking-nome">${nome}</div>
+            <div class="tracking-seq">seq. ${f.stopSequence ?? '—'} · #${f.stopId}</div>
+          </div>
+          <div class="tracking-dx">
+            <div class="tracking-relativo">${fmtMin(minutiAttesa)}</div>
+            <div class="tracking-assoluto">${fmtOrarioAssoluto(f.arrivalTime)}</div>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch (errore) {
+    document.getElementById('busHeaderEl').innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+    document.getElementById('fermateEl').innerHTML = '';
+  }
+}
+
+document.title = matricola ? `Bus ${matricola} — Monitor Live` : 'Dettaglio bus — Monitor Live';
+caricaDettaglioBus();
+setInterval(caricaDettaglioBus, 30000);
+</script>
+</body>
+</html>
