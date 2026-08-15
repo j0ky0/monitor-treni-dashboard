@@ -10,13 +10,19 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.6 (2026-08-14)
+     dashboard_live.html — v1.7 (2026-08-15)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
      Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
+     Novità v1.7: chip fermata reattivi a Direzione+Gruppo (mostrano
+     solo le fermate coerenti con la combinazione scelta, risolve
+     l'ambiguità di fermate con lo stesso nome su capolinea opposti);
+     affollamento bus in card (da worker.js v8); link "nuova scheda"
+     su ogni card bus verso dettaglio_bus.html (extra, non sostituisce
+     il pannello di tracciamento in pagina).
      Novità v1.6: nomi fermate bus risolti da stops.txt (GTFS statico,
      nome grande + numero fermata piccolo) al posto del generico
      "Fermata {numero}"; versione visibile in footer.
@@ -244,15 +250,16 @@
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
     Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
-    <span style="opacity:0.6">dashboard_live.html v1.6</span>
+    <span style="opacity:0.6">dashboard_live.html v1.7</span>
   </footer>
 
 </div>
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.6 (2026-08-14)
-// Novità v1.6: nomi fermate da stops.txt, versione in footer. Vedi CHANGELOG.md.
+// dashboard_live.html — v1.7 (2026-08-15)
+// Novità v1.7: chip fermata reattivi ai filtri, affollamento bus in
+// card, link nuova scheda per bus. Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -299,22 +306,26 @@ const FERMATE_ABITUALI = new Set(TRATTE_BUS.flatMap(t => [t.partenza, t.arrivo])
 
 // ----------------------------------------------------------------
 // Fermate uniche per il picker "battezza fermata" — deduplica per
-// stopId, raccoglie le linee che ci passano (una fermata fisica può
-// essere condivisa da più linee, es. Fiume: 490 direzione ritorno e
-// 80/38 direzione andata).
+// stopId, raccoglie le linee che ci passano. Accetta un sottoinsieme
+// di tratte (di norma quelle GIA' filtrate da Direzione+Gruppo, cosi'
+// il picker mostra solo le fermate coerenti con la combinazione
+// scelta, invece di tutte le 17 sempre — risolve l'ambiguita' di
+// fermate con lo stesso nome su capolinea opposti, es. "Libia (MB1)").
 // ----------------------------------------------------------------
-const FERMATE_UNICHE_MAP = new Map();
-TRATTE_BUS.forEach(t => {
-  [{ stopId: t.partenza, nome: t.nomePartenza }, { stopId: t.arrivo, nome: t.nomeArrivo }].forEach(f => {
-    if (!FERMATE_UNICHE_MAP.has(f.stopId)) {
-      FERMATE_UNICHE_MAP.set(f.stopId, { stopId: f.stopId, nome: f.nome, linee: new Set() });
-    }
-    FERMATE_UNICHE_MAP.get(f.stopId).linee.add(t.linea);
+function costruisciFermateUniche(tratte) {
+  const mappa = new Map();
+  tratte.forEach(t => {
+    [{ stopId: t.partenza, nome: t.nomePartenza }, { stopId: t.arrivo, nome: t.nomeArrivo }].forEach(f => {
+      if (!mappa.has(f.stopId)) {
+        mappa.set(f.stopId, { stopId: f.stopId, nome: f.nome, linee: new Set() });
+      }
+      mappa.get(f.stopId).linee.add(t.linea);
+    });
   });
-});
-const FERMATE_UNICHE = Array.from(FERMATE_UNICHE_MAP.values())
-  .map(f => ({ ...f, linee: Array.from(f.linee).sort() }))
-  .sort((a, b) => a.nome.localeCompare(b.nome));
+  return Array.from(mappa.values())
+    .map(f => ({ ...f, linee: Array.from(f.linee).sort() }))
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+}
 
 // ----------------------------------------------------------------
 // Fermata di riferimento pinnata — persistita in localStorage cosi'
@@ -340,7 +351,7 @@ function caricaFermataPinnataDaStorage() {
 }
 
 function pinFermata(stopId) {
-  const f = FERMATE_UNICHE.find(x => x.stopId === stopId);
+  const f = costruisciFermateUniche(tratteFiltrate()).find(x => x.stopId === stopId);
   if (!f) return;
   fermataPinnata = f;
   salvaFermataPinnata();
@@ -356,7 +367,8 @@ function rimuoviFermataPin() {
 }
 
 function renderFermataChips() {
-  document.getElementById('fermataChips').innerHTML = FERMATE_UNICHE.map(f => `
+  const fermateDaMostrare = costruisciFermateUniche(tratteFiltrate());
+  document.getElementById('fermataChips').innerHTML = fermateDaMostrare.map(f => `
     <div class="fermata-chip" onclick="pinFermata('${f.stopId}')">
       <span class="nome">${f.nome}</span>
       <span class="linee">${f.linee.join(' · ')}</span>
@@ -395,12 +407,14 @@ function selDirezione(direzione) {
   direzioneAttiva = direzione;
   gruppoAttivo = defaultGruppoPer(direzione);
   renderFiltriBus();
+  renderFermataChips();
   caricaBus();
 }
 
 function selGruppo(gruppo) {
   gruppoAttivo = (gruppoAttivo === gruppo) ? null : gruppo;
   renderFiltriBus();
+  renderFermataChips();
   caricaBus();
 }
 
@@ -501,6 +515,7 @@ async function caricaBus() {
           nomePartenza: tratta.nomePartenza,
           nomeArrivo: tratta.nomeArrivo,
           vehicleLabel: trip.vehicleLabel || trip.vehicleId || null,
+          occupancyLabel: trip.occupancyLabel || null,
           minutiAttesa,
           ritardoPartenza: stopPartenza.arrivalDelay,
           orarioPartenza: stopPartenza.arrivalTime,
@@ -535,6 +550,10 @@ async function caricaBus() {
 
       const matricolaAttr = c.vehicleLabel ? `onclick="avviaTracciamento('${c.vehicleLabel}')"` : '';
       const tapHint = c.vehicleLabel ? '<span class="tap-hint">(tocca per tracciare)</span>' : '';
+      const linkNuovaScheda = c.vehicleLabel
+        ? `<a href="dettaglio_bus.html?matricola=${encodeURIComponent(c.vehicleLabel)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="tap-hint" style="text-decoration:underline;">↗ nuova scheda</a>`
+        : '';
+      const occupancyRiga = c.occupancyLabel ? `<div class="bus-vettura">Affollamento: <b>${c.occupancyLabel}</b></div>` : '';
 
       return `
         <div class="bus-card ${urgenteClass}" ${matricolaAttr}>
@@ -552,7 +571,8 @@ async function caricaBus() {
             <span>Passaggio previsto: <b>${orarioPassaggio}</b> <span class="${ritPartClass}">${ritPartTxt}</span></span>
             <span>Arrivo a destinazione: <b>${orarioArrivoDest}</b> <span class="${ritArrClass}">${ritArrTxt}</span></span>
           </div>
-          <div class="bus-vettura">Vettura: <b>${c.vehicleLabel || 'n.d.'}</b>${tapHint}</div>
+          ${occupancyRiga}
+          <div class="bus-vettura">Vettura: <b>${c.vehicleLabel || 'n.d.'}</b>${tapHint} ${linkNuovaScheda}</div>
         </div>`;
     }).join('');
 
