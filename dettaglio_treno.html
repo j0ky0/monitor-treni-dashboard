@@ -10,12 +10,18 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_treno.html — v1.2 (2026-08-14)
+     dettaglio_treno.html — v1.3 (2026-09-07)
      Pagina standalone: percorso completo di un treno (tutte le
      fermate, orari teorici/reali, ritardi, binari). Aperta in nuova
      scheda dal click sul numero treno nel Monitor RFI.
      Dati da: DENO_URL/treno/{numero} (proxy ViaggiaTreno andamentoTreno).
      Stessa identità cromatica (ambra) del modulo Treni di dashboard_live.html.
+     Novità v1.3: FIX bug rilevazione cancellazione — "nonPartito" NON
+     significa cancellato, significa solo "non ancora partito" (stato
+     normale di un treno futuro). Verificato su dato reale (treno 4610,
+     11:05, nonPartito:true ma subTitle:"" e provvedimento:0): veniva
+     mostrato erroneamente come "Treno cancellato". Segnale unico e
+     affidabile resta subTitle === "Treno cancellato".
      Novità v1.2: rilevazione cancellazione corretta (subTitle/nonPartito,
      non solo circolante), causa ritardo se disponibile, ultimo
      rilevamento GPS (anche fuori stazione), versione visibile in footer.
@@ -103,13 +109,13 @@
 
   <footer>
     Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI<br>
-    <span class="footer-rev">dettaglio_treno.html v1.2</span>
+    <span class="footer-rev">dettaglio_treno.html v1.3</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.2 (2026-08-14)
+// dettaglio_treno.html — v1.3 (2026-09-07)
 // Vedi commento di versione nel <style> per il changelog completo.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
@@ -163,9 +169,17 @@ function renderHeader(json) {
 
   // FIX v1.2: "circolante" indica se il treno esiste in orario, NON se
   // la corsa di oggi e' stata cancellata. Verificato su dato reale:
-  // un treno cancellato oggi aveva comunque circolante:true. Il segnale
-  // vero e' subTitle === "Treno cancellato" (o nonPartito / provvedimento).
-  const cancellato = json.subTitle === 'Treno cancellato' || json.nonPartito === true;
+  // un treno cancellato oggi aveva comunque circolante:true.
+  //
+  // FIX v1.3: la v1.2 aggiungeva anche "nonPartito === true" come
+  // secondo segnale di cancellazione, ma questo era un errore mai
+  // verificato su dati reali. "nonPartito" significa solo "il treno
+  // non e' ancora partito" (stato normalissimo prima dell'orario di
+  // partenza) — non ha nulla a che fare con la cancellazione. Confermato
+  // su dato reale (treno 4610, non ancora partito: nonPartito:true,
+  // subTitle:"", provvedimento:0, compRitardo:"non partito"). L'unico
+  // segnale affidabile resta subTitle === "Treno cancellato".
+  const cancellato = json.subTitle === 'Treno cancellato';
   const nonCircolante = json.circolante === false;
 
   // Causa del ritardo: spesso null anche su treni in ritardo (limite
