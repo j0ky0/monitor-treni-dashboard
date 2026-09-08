@@ -10,13 +10,53 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.7 (2026-08-15)
+     dashboard_live.html — v1.9 (2026-09-07)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
      Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
+     Novità v1.9: tabellone treni dual-source. Ogni riga del tabellone
+     principale (guidato da RFI, quasi in tempo reale) mostra ora anche
+     il ritardo secondo ViaggiaTreno affiancato sotto lo stato RFI
+     (riga "VT: ..."), invece di dover aprire un pannello separato.
+     Le due fonti vengono scaricate in parallelo (Promise.allSettled)
+     ad ogni refresh: se ViaggiaTreno non risponde il tabellone RFI
+     resta comunque utilizzabile, con "VT: n.d." su ogni riga. Il
+     matching tra le due fonti è per numeroTreno, normalizzato a
+     stringa (RFI lo estrae come stringa dal markup HTML, ViaggiaTreno
+     lo restituisce come numero: senza normalizzare il confronto
+     avrebbe fallito silenziosamente su ogni riga).
+     Nota sulla latenza: ViaggiaTreno ha più latenza di RFI, quindi può
+     capitare che per uno stesso treno RFI dica "in orario/partito" e
+     VT mostri ancora "non partito" (ritardo 0 ma dato non aggiornato).
+     Non è un bug da correggere: è la differenza reale tra le due fonti,
+     mostrata così com'è, senza tentare di "correggere" o nascondere
+     la discrepanza.
+     Il vecchio toggle "Vista classica" (bottone con bordo, ben
+     visibile) è stato sostituito da un link testuale discreto
+     "tabellone ViaggiaTreno (foto meno recente)" in fondo all'header
+     della sezione — resta utile come riferimento se il Monitor RFI ha
+     problemi, ma non deve competere visivamente con il tabellone
+     principale. Il pannello dietro questo link ora riusa la cache
+     scaricata dal tabellone principale (ultimoTabelloneVT) invece di
+     rifare una fetch propria: elimina la doppia chiamata di rete che
+     si aveva prima ad ogni apertura del pannello, e rimuove il rischio
+     di mostrare dati di una stazione diversa da quella appena
+     selezionata durante il breve istante prima che la nuova fetch
+     risponda (race condition presente nella versione precedente se
+     non gestita: la cache va aggiornata PRIMA di ridisegnare il
+     pannello, non dopo, per questo la chiamata di render è stata
+     centralizzata dentro caricaTreniRFI invece di essere sparsa in
+     selStazione/selModalita/aggiornaTutto).
+     Novità v1.8: comportamento schede uniformato tra treni e bus.
+     Ora l'intera riga treno e l'intera card bus sono un link che apre
+     il dettaglio in nuova scheda (target=_blank), stesso target size
+     su entrambi. Il tracciamento vettura bus (che prima scattava al
+     tap sulla card) è stato spostato su un bottone dedicato
+     "📍 Traccia" dentro la card, con stopPropagation per non
+     interferire con l'apertura del link.
      Novità v1.7: chip fermata reattivi a Direzione+Gruppo (mostrano
      solo le fermate coerenti con la combinazione scelta, risolve
      l'ambiguità di fermate con lo stesso nome su capolinea opposti);
@@ -89,9 +129,11 @@
   .bus-filtri button.on { background: rgba(45,212,175,0.12); border-color: var(--teal-dim); color: var(--teal); }
   .bus-filtri .riga-sub button { font-size: 0.72rem; padding: 6px 10px; }
 
-  .bus-card { background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; padding: 0.9rem 1rem; margin-bottom: 8px; cursor: pointer; }
+  .bus-card { display: block; background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; padding: 0.9rem 1rem; margin-bottom: 8px; cursor: pointer; text-decoration: none; color: inherit; }
   .bus-card:active { border-color: var(--teal-dim); }
   .bus-card.urgente { border-color: var(--red); }
+  .btn-traccia { font-family: var(--font-mono); background: var(--bg-elevato, #1a2230); color: var(--teal-dim); border: 1px solid var(--teal-dim); border-radius: 6px; padding: 3px 8px; font-size: 0.78rem; cursor: pointer; margin-left: 4px; }
+  .btn-traccia:active { background: var(--teal-dim); color: #fff; }
   .bus-top { display: flex; justify-content: space-between; align-items: flex-start; }
   .bus-linea { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .badge-linea { background: var(--bg-flap); border: 1px solid var(--rule); color: var(--teal); font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; padding: 3px 9px; border-radius: 6px; flex-shrink: 0; }
@@ -142,18 +184,19 @@
   .toggle-pa button.on { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); font-weight: 600; }
 
   .treno-list-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
-  .treno-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--rule); gap: 8px; }
+  .treno-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--rule); gap: 8px; text-decoration: none; color: inherit; cursor: pointer; }
+  .treno-row:active { background: rgba(255,255,255,0.03); }
   .treno-row:last-child { border-bottom: none; }
   .treno-sx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .treno-num-riga { display: flex; align-items: baseline; gap: 6px; }
-  .treno-num { font-family: var(--font-mono); color: var(--amber); font-weight: 700; font-size: 0.85rem; background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: var(--amber-dim); text-underline-offset: 2px; }
-  .treno-num:active { color: #fff; }
+  .treno-num { font-family: var(--font-mono); color: var(--amber); font-weight: 700; font-size: 0.85rem; }
   .treno-cat { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; }
   .treno-dest { font-size: 0.78rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .treno-dx { text-align: right; flex-shrink: 0; }
   .treno-orario { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text); }
   .treno-bin { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
   .treno-stato { font-size: 0.66rem; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
+  .treno-vt { font-size: 0.62rem; margin-top: 1px; color: var(--text-muted); font-family: var(--font-mono); }
   .treno-lampeggio { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); margin-left: 6px; vertical-align: middle; animation: pulse-treno 1.4s ease-in-out infinite; }
   @keyframes pulse-treno { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
   .stato-in_orario { color: var(--green); }
@@ -165,7 +208,8 @@
   .rfi-link-esterno a { color: var(--text-muted); }
 
   .section-label-row { display: flex; justify-content: space-between; align-items: center; }
-  .btn-vista-alt { background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 3px 8px; font-size: 0.68rem; color: var(--text-muted); cursor: pointer; text-transform: none; letter-spacing: 0; font-family: var(--font-sans); }
+  .link-vista-alt { background: none; border: none; padding: 0; font-size: 0.68rem; color: var(--text-muted); cursor: pointer; text-transform: none; letter-spacing: 0; font-family: var(--font-sans); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
+  .link-vista-alt:active { color: var(--text); }
 
   .treno-dettaglio-row { padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 0.8rem; }
   .treno-dettaglio-row:last-child { border-bottom: none; }
@@ -227,8 +271,8 @@
   </div>
 
   <div class="section-label mod-treni section-label-row">
-    <span>🚆 Treni — Monitor RFI</span>
-    <button class="btn-vista-alt" onclick="toggleVistaClassica()" id="btnVistaClassica">Vista classica ▾</button>
+    <span>🚆 Treni — RFI + ViaggiaTreno</span>
+    <a href="javascript:void(0)" class="link-vista-alt" onclick="toggleVistaClassica()" id="btnVistaClassica">tabellone ViaggiaTreno (foto meno recente) ▾</a>
   </div>
   <div class="tabs" id="stazioniTabs"></div>
   <div class="toggle-pa" id="togglePA">
@@ -250,16 +294,17 @@
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
     Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
-    <span style="opacity:0.6">dashboard_live.html v1.7</span>
+    <span style="opacity:0.6">dashboard_live.html v1.9</span>
   </footer>
 
 </div>
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.7 (2026-08-15)
-// Novità v1.7: chip fermata reattivi ai filtri, affollamento bus in
-// card, link nuova scheda per bus. Vedi CHANGELOG.md.
+// dashboard_live.html — v1.9 (2026-09-07)
+// Novità v1.9: tabellone treni dual-source (RFI + ViaggiaTreno
+// affiancati per riga), link vista classica reso discreto e
+// riusa la cache invece di rifare la fetch. Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -548,15 +593,16 @@ async function caricaBus() {
         ritArrTxt = `${c.ritardoArrivo > 0 ? '+' : ''}${(c.ritardoArrivo/60).toFixed(1)}'`;
       }
 
-      const matricolaAttr = c.vehicleLabel ? `onclick="avviaTracciamento('${c.vehicleLabel}')"` : '';
-      const tapHint = c.vehicleLabel ? '<span class="tap-hint">(tocca per tracciare)</span>' : '';
-      const linkNuovaScheda = c.vehicleLabel
-        ? `<a href="dettaglio_bus.html?matricola=${encodeURIComponent(c.vehicleLabel)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="tap-hint" style="text-decoration:underline;">↗ nuova scheda</a>`
+      const matricolaAttr = c.vehicleLabel
+        ? `onclick="event.stopPropagation(); event.preventDefault(); avviaTracciamento('${c.vehicleLabel}')"`
+        : '';
+      const btnTraccia = c.vehicleLabel
+        ? `<button class="btn-traccia" ${matricolaAttr}>📍 Traccia</button>`
         : '';
       const occupancyRiga = c.occupancyLabel ? `<div class="bus-vettura">Affollamento: <b>${c.occupancyLabel}</b></div>` : '';
 
       return `
-        <div class="bus-card ${urgenteClass}" ${matricolaAttr}>
+        <a class="bus-card ${urgenteClass}" href="dettaglio_bus.html?matricola=${encodeURIComponent(c.vehicleLabel || '')}" target="_blank" rel="noopener">
           <div class="bus-top">
             <div class="bus-linea">
               <span class="badge-linea">${c.linea}</span>
@@ -572,8 +618,8 @@ async function caricaBus() {
             <span>Arrivo a destinazione: <b>${orarioArrivoDest}</b> <span class="${ritArrClass}">${ritArrTxt}</span></span>
           </div>
           ${occupancyRiga}
-          <div class="bus-vettura">Vettura: <b>${c.vehicleLabel || 'n.d.'}</b>${tapHint} ${linkNuovaScheda}</div>
-        </div>`;
+          <div class="bus-vettura">Vettura: <b>${c.vehicleLabel || 'n.d.'}</b> ${btnTraccia}</div>
+        </a>`;
     }).join('');
 
   } catch (errore) {
@@ -725,8 +771,24 @@ async function caricaVettura() {
 }
 
 // ================================================================
-// TRENI — Monitor RFI (vista principale)
+// TRENI — Monitor RFI (vista principale) + arricchimento ViaggiaTreno
 // ================================================================
+// Cache dell'ultimo tabellone ViaggiaTreno scaricato (lista filtrata
+// per la modalita' attiva, partenze o arrivi). Serve sia per
+// arricchire il tabellone RFI (dual-source, v1.9) sia per popolare
+// la vista classica senza rifare la stessa chiamata due volte.
+let ultimoTabelloneVT = [];
+
+async function fetchTabelloneVT() {
+  const risposta = await fetch(`${DENO_URL}/tabellone/${stazioneAttiva.codViaggiaTreno}`);
+  const json = await risposta.json();
+  if (json.errore) throw new Error(json.errore);
+  const lista = (modalitaAttiva === 'partenze' ? json.partenze : json.arrivi) || [];
+  return lista
+    .filter(t => t.stato !== 'passato_oltre_ora')
+    .sort((a, b) => (a.orarioProgrammato || '').localeCompare(b.orarioProgrammato || ''));
+}
+
 function formattaStatoTreno(t) {
   const stato = t.stato || 'sconosciuto';
   const mappaTesto = {
@@ -738,14 +800,47 @@ function formattaStatoTreno(t) {
   return `<div class="treno-stato stato-${stato}">${mappaTesto[stato] || stato}</div>`;
 }
 
+// Riga di arricchimento ViaggiaTreno sotto lo stato RFI. RFI e'
+// quasi in tempo reale, ViaggiaTreno ha piu' latenza: puo' capitare
+// che VT mostri ancora un treno come "non partito" quando RFI lo da'
+// gia' partito/in orario. Non e' un bug, e' la fotografia meno
+// recente di VT mostrata cosi' com'e' — utile come riferimento in
+// caso il Monitor RFI abbia problemi.
+function formattaVTAffiancato(numeroTreno, mappaVT) {
+  const vt = mappaVT.get(String(numeroTreno));
+  if (!vt) return '<div class="treno-vt">VT: <span class="rit-zero">n.d.</span></div>';
+  return `<div class="treno-vt">VT: ${formattaRitardoTreno(vt.ritardo)}</div>`;
+}
+
 async function caricaTreniRFI() {
   const el = document.getElementById('treniRfiEl');
-  el.innerHTML = '<div class="loading">Caricamento tabellone RFI...</div>';
+  el.innerHTML = '<div class="loading">Caricamento tabellone...</div>';
 
   try {
     const arrivals = modalitaAttiva === 'arrivi';
-    const risposta = await fetch(`${DENO_URL}/rfi-tabellone/${stazioneAttiva.placeId}?arrivals=${arrivals}`);
-    const json = await risposta.json();
+
+    // Fetch parallelo delle due fonti. Se ViaggiaTreno fallisce non
+    // blocchiamo il tabellone: RFI resta comunque affidabile da solo,
+    // VT diventa solo "n.d." su ogni riga (vedi formattaVTAffiancato).
+    const [rfiRisultato, vtRisultato] = await Promise.allSettled([
+      fetch(`${DENO_URL}/rfi-tabellone/${stazioneAttiva.placeId}?arrivals=${arrivals}`).then(r => r.json()),
+      fetchTabelloneVT(),
+    ]);
+
+    if (vtRisultato.status === 'fulfilled') {
+      ultimoTabelloneVT = vtRisultato.value;
+    } // se rejected, ultimoTabelloneVT resta quello del giro precedente (meglio di niente)
+
+    // Se il pannello "foto meno recente" e' aperto, lo aggiorniamo qui
+    // stesso: la cache e' appena stata rinfrescata in questo stesso
+    // giro, evita una seconda fetch scoordinata da un altro punto.
+    if (vistaClassicaAperta) renderVistaClassica();
+
+    if (rfiRisultato.status === 'rejected') {
+      el.innerHTML = `<div class="errore">Errore di connessione: ${rfiRisultato.reason.message}</div>`;
+      return;
+    }
+    const json = rfiRisultato.value;
 
     if (json.errore) {
       el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
@@ -759,16 +854,21 @@ async function caricaTreniRFI() {
       return;
     }
 
+    // Mappa di lookup VT per numeroTreno, normalizzato a stringa: RFI
+    // lo estrae come stringa dal markup HTML, ViaggiaTreno lo restituisce
+    // come numero — senza normalizzare il confronto fallirebbe sempre.
+    const mappaVT = new Map(ultimoTabelloneVT.map(t => [String(t.numeroTreno), t]));
+
     el.innerHTML = lista.map(t => {
       const binario = t.binario || '—';
       const etichettaLampeggio = modalitaAttiva === 'arrivi' ? 'In arrivo' : 'In partenza';
       const puntinoLampeggio = t.inArrivo === true
         ? `<span class="treno-lampeggio" title="${etichettaLampeggio}"></span>` : '';
       return `
-        <div class="treno-row">
+        <a class="treno-row" href="dettaglio_treno.html?numero=${t.numeroTreno}" target="_blank" rel="noopener">
           <div class="treno-sx">
             <div class="treno-num-riga">
-              <a class="treno-num" href="dettaglio_treno.html?numero=${t.numeroTreno}" target="_blank" rel="noopener">${t.numeroTreno}</a>
+              <span class="treno-num">${t.numeroTreno}</span>
               <span class="treno-cat">${t.operatore || ''} ${t.categoria || ''}</span>
             </div>
             <div class="treno-dest">${t.stazione || '—'}</div>
@@ -777,8 +877,9 @@ async function caricaTreniRFI() {
             <div class="treno-orario">${t.orario || '—'}${puntinoLampeggio}</div>
             <div class="treno-bin">bin. ${binario}</div>
             ${formattaStatoTreno(t)}
+            ${formattaVTAffiancato(t.numeroTreno, mappaVT)}
           </div>
-        </div>`;
+        </a>`;
     }).join('');
 
   } catch (errore) {
@@ -789,8 +890,8 @@ async function caricaTreniRFI() {
 function toggleVistaClassica() {
   vistaClassicaAperta = !vistaClassicaAperta;
   document.getElementById('vistaClassicaWrap').style.display = vistaClassicaAperta ? 'block' : 'none';
-  document.getElementById('btnVistaClassica').textContent = vistaClassicaAperta ? 'Vista classica ▴' : 'Vista classica ▾';
-  if (vistaClassicaAperta) caricaTreni();
+  document.getElementById('btnVistaClassica').textContent = vistaClassicaAperta ? 'tabellone ViaggiaTreno ▴' : 'tabellone ViaggiaTreno (foto meno recente) ▾';
+  if (vistaClassicaAperta) renderVistaClassica();
 }
 
 // ================================================================
@@ -815,52 +916,50 @@ function formattaRitardoTreno(min) {
   return `<span class="${cls}">${segno}${min}'</span>`;
 }
 
-async function caricaTreni() {
+// Pannello "foto meno recente": non fa piu' una fetch propria, usa
+// ultimoTabelloneVT gia' scaricato da caricaTreniRFI nello stesso giro
+// di refresh (v1.9, evita di duplicare la stessa chiamata di rete).
+// Se il pannello viene aperto prima ancora del primo refresh del
+// tabellone RFI, ultimoTabelloneVT e' ancora vuoto: in quel caso
+// facciamo comunque una fetch diretta di cortesia.
+async function renderVistaClassica() {
   const el = document.getElementById('treniEl');
-  el.innerHTML = '<div class="loading">Caricamento tabellone...</div>';
 
-  try {
-    const risposta = await fetch(`${DENO_URL}/tabellone/${stazioneAttiva.codViaggiaTreno}`);
-    const json = await risposta.json();
-
-    if (json.errore) {
-      el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
+  let lista = ultimoTabelloneVT;
+  if (lista.length === 0) {
+    el.innerHTML = '<div class="loading">Caricamento tabellone...</div>';
+    try {
+      lista = await fetchTabelloneVT();
+      ultimoTabelloneVT = lista;
+    } catch (errore) {
+      el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
       return;
     }
-
-    const lista = (modalitaAttiva === 'partenze' ? json.partenze : json.arrivi) || [];
-
-    const filtrata = lista
-      .filter(t => t.stato !== 'passato_oltre_ora')
-      .sort((a, b) => (a.orarioProgrammato || '').localeCompare(b.orarioProgrammato || ''));
-
-    if (filtrata.length === 0) {
-      el.innerHTML = '<div class="vuoto">Nessun treno nella finestra attuale</div>';
-      return;
-    }
-
-    el.innerHTML = filtrata.map(t => {
-      const destOrig = modalitaAttiva === 'partenze' ? t.destinazione : t.origine;
-      const binario = t.binarioEffettivo || t.binarioProgrammato || '—';
-      return `
-        <div class="treno-row">
-          <div class="treno-sx">
-            <div class="treno-num-riga">
-              <span class="treno-num">${t.numeroTreno}</span>
-              <span class="treno-cat">${t.categoria || ''}</span>
-            </div>
-            <div class="treno-dest">${destOrig || '—'}</div>
-          </div>
-          <div class="treno-dx">
-            <div class="treno-orario">${t.orarioProgrammato || '—'} ${formattaRitardoTreno(t.ritardo)}</div>
-            <div class="treno-bin">bin. ${binario}</div>
-          </div>
-        </div>`;
-    }).join('');
-
-  } catch (errore) {
-    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
   }
+
+  if (lista.length === 0) {
+    el.innerHTML = '<div class="vuoto">Nessun treno nella finestra attuale</div>';
+    return;
+  }
+
+  el.innerHTML = lista.map(t => {
+    const destOrig = modalitaAttiva === 'partenze' ? t.destinazione : t.origine;
+    const binario = t.binarioEffettivo || t.binarioProgrammato || '—';
+    return `
+      <div class="treno-row">
+        <div class="treno-sx">
+          <div class="treno-num-riga">
+            <span class="treno-num">${t.numeroTreno}</span>
+            <span class="treno-cat">${t.categoria || ''}</span>
+          </div>
+          <div class="treno-dest">${destOrig || '—'}</div>
+        </div>
+        <div class="treno-dx">
+          <div class="treno-orario">${t.orarioProgrammato || '—'} ${formattaRitardoTreno(t.ritardo)}</div>
+          <div class="treno-bin">bin. ${binario}</div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 function aggiornaLinkRfi() {
@@ -874,7 +973,6 @@ function selStazione(codViaggiaTreno) {
   renderTabsStazioni();
   aggiornaLinkRfi();
   caricaTreniRFI();
-  if (vistaClassicaAperta) caricaTreni();
 }
 
 function selModalita(modalita) {
@@ -882,7 +980,6 @@ function selModalita(modalita) {
   renderTogglePA();
   aggiornaLinkRfi();
   caricaTreniRFI();
-  if (vistaClassicaAperta) caricaTreni();
 }
 
 // ================================================================
@@ -896,7 +993,6 @@ function aggiornaTutto() {
     caricaBus();
   }
   caricaTreniRFI();
-  if (vistaClassicaAperta) caricaTreni();
 }
 
 aggiornaOra();
