@@ -10,13 +10,45 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.9 (2026-09-07)
+     dashboard_live.html — v1.10 (2026-09-07)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
      Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
+     Novità v1.10: treni preferiti. Stellina (★/☆) su ogni riga del
+     tabellone principale per marcare/smarcare un treno; persistenza in
+     localStorage (chiave monitorLive.treniPreferiti), stesso pattern
+     gia' usato per fermata pinnata e vettura tracciata. Nuovo pannello
+     "⭐ Treni preferiti" sempre visibile in cima alla pagina, PRIMA
+     ancora del modulo Bus — volutamente indipendente dalla stazione e
+     dal filtro Partenze/Arrivi selezionati nel tabellone sottostante,
+     perche' il caso d'uso e' "controllo rapido durante il viaggio":
+     se sei gia' partito, la stazione visualizzata nel tabellone
+     principale non e' piu' quella rilevante, ma vuoi comunque sapere
+     a colpo d'occhio come sta andando il tuo treno. Per questo il
+     pannello interroga direttamente /treno/{numero} (stesso endpoint
+     gia' usato da dettaglio_treno.html), non il tabellone per
+     stazione: funziona per qualsiasi treno preferito ovunque si trovi
+     lungo la sua corsa.
+     Riusa lo stesso fix di rilevazione cancellazione gia' introdotto
+     in dettaglio_treno.html v1.3 (solo subTitle === "Treno cancellato"
+     e' affidabile, nonPartito NON significa cancellato) — qui pero'
+     "non partito" e "non in circolazione oggi" vengono mostrati come
+     stati informativi a se stanti (grigi, non rossi), non equiparati
+     a cancellato: sono utili da sapere quando controlli un preferito,
+     non sono errori da nascondere.
+     Ogni fetch dei preferiti e' indipendente dalle altre
+     (Promise.allSettled): se un treno preferito non viene trovato
+     (es. non circola nei weekend) non blocca gli altri, mostra solo
+     "Dato non disponibile" con un tasto per rimuoverlo dai preferiti.
+     Nessun refresh automatico periodico esiste nella pagina (solo
+     l'orologio si aggiorna da solo ogni 30s, i dati richiedono un tap
+     su "↻ Aggiorna" — vedi punto 5 della lista sviluppi, ancora da
+     affrontare): il pannello preferiti segue la stessa logica, si
+     aggiorna al caricamento pagina e ad ogni tap su "↻ Aggiorna"
+     (dentro aggiornaTutto), non da solo in background.
      Novità v1.9: tabellone treni dual-source. Ogni riga del tabellone
      principale (guidato da RFI, quasi in tempo reale) mostra ora anche
      il ritardo secondo ViaggiaTreno affiancato sotto lo stato RFI
@@ -207,6 +239,21 @@
   .rfi-link-esterno { display: block; text-align: center; font-size: 0.72rem; color: var(--text-muted); padding: 10px 0 4px; }
   .rfi-link-esterno a { color: var(--text-muted); }
 
+  /* Pannello Preferiti: stato indipendente dalla stazione/tab attiva,
+     interroga direttamente ViaggiaTreno per numero treno. */
+  .preferito-card { display: flex; justify-content: space-between; align-items: center; background: var(--bg-panel); border: 1px solid var(--amber-dim); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; text-decoration: none; color: inherit; }
+  .preferito-sx { min-width: 0; }
+  .preferito-num { font-family: var(--font-mono); color: var(--amber); font-weight: 700; font-size: 0.82rem; }
+  .preferito-tratta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .preferito-stato { font-size: 0.75rem; font-family: var(--font-mono); text-align: right; flex-shrink: 0; padding-left: 8px; }
+  .preferito-stato.non-partito, .preferito-stato.non-circolante { color: var(--text-muted); }
+  .preferito-stato.cancellato { color: var(--red); font-weight: 700; }
+  .btn-rimuovi-preferito { background: none; border: none; color: var(--text-muted); font-size: 1rem; line-height: 1; padding: 0 0 0 10px; cursor: pointer; }
+  .btn-rimuovi-preferito:active { color: var(--red); }
+
+  .btn-stella { background: none; border: none; padding: 0 2px; font-size: 0.9rem; line-height: 1; cursor: pointer; color: var(--text-muted); vertical-align: middle; }
+  .btn-stella.attiva { color: var(--amber); }
+
   .section-label-row { display: flex; justify-content: space-between; align-items: center; }
   .link-vista-alt { background: none; border: none; padding: 0; font-size: 0.68rem; color: var(--text-muted); cursor: pointer; text-transform: none; letter-spacing: 0; font-family: var(--font-sans); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
   .link-vista-alt:active { color: var(--text); }
@@ -232,6 +279,9 @@
     </div>
     <button class="btn-refresh" onclick="aggiornaTutto()">↻ Aggiorna</button>
   </header>
+
+  <div class="section-label mod-treni" id="sectionPreferiti" style="display:none;">⭐ Treni preferiti</div>
+  <div id="preferitiWrap"></div>
 
   <div class="section-label mod-bus">🚌 Bus in tempo reale</div>
 
@@ -294,17 +344,17 @@
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
     Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
-    <span style="opacity:0.6">dashboard_live.html v1.9</span>
+    <span style="opacity:0.6">dashboard_live.html v1.10</span>
   </footer>
 
 </div>
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.9 (2026-09-07)
-// Novità v1.9: tabellone treni dual-source (RFI + ViaggiaTreno
-// affiancati per riga), link vista classica reso discreto e
-// riusa la cache invece di rifare la fetch. Vedi CHANGELOG.md.
+// dashboard_live.html — v1.10 (2026-09-07)
+// Novità v1.10: treni preferiti (stellina sulla riga, pannello sempre
+// visibile in alto, indipendente da stazione/filtro, interroga
+// /treno/{numero} direttamente). Vedi CHANGELOG.md.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -771,6 +821,118 @@ async function caricaVettura() {
 }
 
 // ================================================================
+// TRENI PREFERITI (v1.10)
+// ================================================================
+// Elenco di numeri treno preferiti, persistito in localStorage nello
+// stesso stile gia' usato per fermataPinnata/vetturaTracciata.
+// Il pannello e' volutamente indipendente dalla stazione/tab attiva:
+// interroga direttamente /treno/{numero} (stesso endpoint di
+// dettaglio_treno.html), cosi' funziona anche "durante il viaggio"
+// quando la stazione selezionata nel tabellone non e' piu' quella
+// pertinente (es. sei gia' partito da un pezzo).
+let treniPreferiti = [];
+
+function caricaPreferitiSalvati() {
+  try {
+    const grezzo = localStorage.getItem('monitorLive.treniPreferiti');
+    treniPreferiti = grezzo ? JSON.parse(grezzo) : [];
+  } catch { treniPreferiti = []; }
+}
+
+function salvaPreferiti() {
+  try { localStorage.setItem('monitorLive.treniPreferiti', JSON.stringify(treniPreferiti)); } catch {}
+}
+
+function ePreferito(numeroTreno) {
+  return treniPreferiti.includes(String(numeroTreno));
+}
+
+function toggleFavorito(numeroTreno) {
+  const num = String(numeroTreno);
+  if (ePreferito(num)) {
+    treniPreferiti = treniPreferiti.filter(n => n !== num);
+  } else {
+    treniPreferiti.push(num);
+  }
+  salvaPreferiti();
+  // Riflette lo stato della stellina su tutte le righe del tabellone
+  // gia' disegnate, senza dover ricaricare tutto il tabellone.
+  document.querySelectorAll(`.btn-stella[data-num="${num}"]`).forEach(btn => {
+    btn.classList.toggle('attiva', ePreferito(num));
+    btn.textContent = ePreferito(num) ? '★' : '☆';
+  });
+  caricaPreferitiPannello();
+}
+
+// Stesso segnale di cancellazione corretto in dettaglio_treno.html
+// v1.3: solo subTitle e' affidabile, nonPartito NON significa
+// cancellato. "Non partito" e "non in circolazione oggi" restano
+// comunque informazioni utili da mostrare qui, solo non equiparate
+// a "cancellato".
+function classificaStatoPreferito(json) {
+  if (json.subTitle === 'Treno cancellato') {
+    return { classe: 'cancellato', testo: 'Cancellato' };
+  }
+  if (json.circolante === false) {
+    return { classe: 'non-circolante', testo: 'Non in circolazione oggi' };
+  }
+  if (json.nonPartito === true) {
+    return { classe: 'non-partito', testo: 'Non partito' };
+  }
+  if (json.arrivato === true) {
+    return { classe: '', testo: 'Arrivato' };
+  }
+  const min = typeof json.ritardo === 'number' ? json.ritardo : null;
+  if (min === null) return { classe: '', testo: '—' };
+  if (min <= 0) return { classe: '', testo: min < 0 ? `${min}'` : 'In orario' };
+  return { classe: '', testo: `+${min}'` };
+}
+
+async function caricaPreferitiPannello() {
+  const sezione = document.getElementById('sectionPreferiti');
+  const wrap = document.getElementById('preferitiWrap');
+
+  if (treniPreferiti.length === 0) {
+    sezione.style.display = 'none';
+    wrap.innerHTML = '';
+    return;
+  }
+  sezione.style.display = '';
+  wrap.innerHTML = '<div class="loading">Caricamento preferiti...</div>';
+
+  // Fetch indipendenti per ogni treno preferito: se uno fallisce (es.
+  // numero non trovato oggi) non deve rompere gli altri.
+  const risultati = await Promise.allSettled(
+    treniPreferiti.map(num => fetch(`${DENO_URL}/treno/${num}`).then(r => r.json()))
+  );
+
+  wrap.innerHTML = risultati.map((ris, i) => {
+    const num = treniPreferiti[i];
+    if (ris.status === 'rejected' || ris.value.errore) {
+      return `
+        <div class="preferito-card">
+          <div class="preferito-sx">
+            <div class="preferito-num">${num}</div>
+            <div class="preferito-tratta">Dato non disponibile</div>
+          </div>
+          <button class="btn-rimuovi-preferito" onclick="toggleFavorito('${num}')" title="Rimuovi">✕</button>
+        </div>`;
+    }
+    const json = ris.value;
+    const stato = classificaStatoPreferito(json);
+    return `
+      <a class="preferito-card" href="dettaglio_treno.html?numero=${num}" target="_blank" rel="noopener">
+        <div class="preferito-sx">
+          <div class="preferito-num">${json.compNumeroTreno || num}</div>
+          <div class="preferito-tratta">${json.origine || '—'} → ${json.destinazione || '—'}</div>
+        </div>
+        <div class="preferito-stato ${stato.classe}">${stato.testo}</div>
+        <button class="btn-rimuovi-preferito" onclick="event.preventDefault(); event.stopPropagation(); toggleFavorito('${num}')" title="Rimuovi">✕</button>
+      </a>`;
+  }).join('');
+}
+
+// ================================================================
 // TRENI — Monitor RFI (vista principale) + arricchimento ViaggiaTreno
 // ================================================================
 // Cache dell'ultimo tabellone ViaggiaTreno scaricato (lista filtrata
@@ -864,10 +1026,13 @@ async function caricaTreniRFI() {
       const etichettaLampeggio = modalitaAttiva === 'arrivi' ? 'In arrivo' : 'In partenza';
       const puntinoLampeggio = t.inArrivo === true
         ? `<span class="treno-lampeggio" title="${etichettaLampeggio}"></span>` : '';
+      const stellaAttiva = ePreferito(t.numeroTreno) ? 'attiva' : '';
+      const stellaSimbolo = ePreferito(t.numeroTreno) ? '★' : '☆';
       return `
         <a class="treno-row" href="dettaglio_treno.html?numero=${t.numeroTreno}" target="_blank" rel="noopener">
           <div class="treno-sx">
             <div class="treno-num-riga">
+              <button class="btn-stella ${stellaAttiva}" data-num="${t.numeroTreno}" title="Aggiungi/rimuovi dai preferiti" onclick="event.preventDefault(); event.stopPropagation(); toggleFavorito('${t.numeroTreno}')">${stellaSimbolo}</button>
               <span class="treno-num">${t.numeroTreno}</span>
               <span class="treno-cat">${t.operatore || ''} ${t.categoria || ''}</span>
             </div>
@@ -993,6 +1158,7 @@ function aggiornaTutto() {
     caricaBus();
   }
   caricaTreniRFI();
+  caricaPreferitiPannello();
 }
 
 aggiornaOra();
@@ -1002,11 +1168,14 @@ renderTogglePA();
 aggiornaLinkRfi();
 
 // Ripristino stato salvato (fermata pinnata + eventuale tracciamento
-// vettura in corso) prima del primo caricamento, cosi' la pagina
-// riapre esattamente dove l'avevi lasciata.
+// vettura in corso + treni preferiti) prima del primo caricamento,
+// cosi' la pagina riapre esattamente dove l'avevi lasciata.
 caricaFermataPinnataDaStorage();
 renderFermataChips();
 renderFermataPin();
+
+caricaPreferitiSalvati();
+caricaPreferitiPannello();
 
 const matricolaSalvata = caricaVetturaTracciataDaStorage();
 if (matricolaSalvata) {
