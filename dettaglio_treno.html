@@ -10,12 +10,49 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_treno.html — v1.3 (2026-09-07)
+     dettaglio_treno.html — v1.5 (2026-09-08)
      Pagina standalone: percorso completo di un treno (tutte le
      fermate, orari teorici/reali, ritardi, binari). Aperta in nuova
      scheda dal click sul numero treno nel Monitor RFI.
      Dati da: DENO_URL/treno/{numero} (proxy ViaggiaTreno andamentoTreno).
      Stessa identità cromatica (ambra) del modulo Treni di dashboard_live.html.
+     Novità v1.5: redesign visivo completo, ispirato al layout a
+     timeline di altre app di monitoraggio treni (screenshot fornito
+     dall'utente). Cambia la STRUTTURA: nuova card "posizione attuale"
+     prominente in cima (stazione + orario ultimo rilevamento GPS +
+     badge ritardo, prima era una riga minuscola in fondo all'header);
+     percorso completo ridisegnato da elenco puntato a timeline con
+     pallino/linea verticale colorata fino alla fermata corrente,
+     tabella compatta Stazione/Binario/Arrivo/Partenza per riga.
+     Non cambia la PALETTE: resta l'ambra come identita' del modulo
+     treni (coerente col resto del progetto), non il rosso dello
+     screenshot di riferimento — il rosso in questo progetto e' gia'
+     riservato a errori/ritardi/cancellazioni, riusarlo per "fermata
+     gia' passata" avrebbe creato ambiguita' visiva.
+     Novita' funzionale, non solo estetica: le fermate non ancora
+     raggiunte ora mostrano un orario PROIETTATO (teorico + ritardo
+     complessivo attuale del treno), colorato in verde/ambra per
+     distinguerlo chiaramente da un orario CONFERMATO (bianco, quando
+     ViaggiaTreno ha gia' un dato reale per quella fermata) — prima la
+     v1.x mostrava solo l'orario teorico barrato senza proiezione.
+     La fermata "corrente" e' identificata sulla stazione di
+     json.stazioneUltimoRilevamento (stesso campo gia' usato per il
+     vecchio rilevamento GPS): se il treno non e' ancora partito o il
+     nome non trova una corrispondenza esatta tra le fermate, nessuna
+     riga viene evidenziata — comportamento consapevole, non un bug.
+     Rimosso codice v1.x non piu' usato (blocccoOrario, formattaRitardo,
+     tutte le classi CSS fermata-*) per non lasciare funzioni morte.
+     NON incluso in questa versione (rimandato a un secondo giro):
+     click su una fermata intermedia per aprire il tabellone di quella
+     stazione in nuova scheda — le fermate intermedie del percorso non
+     sono tra le stazioni configurate in dashboard_live.html, serve
+     prima capire quale URL usare per una stazione generica.
+     Novità v1.4: stellina preferiti anche qui, non solo nella riga
+     del tabellone di dashboard_live.html. Stessa chiave localStorage
+     (monitorLive.treniPreferiti) di dashboard_live.html — marcare da
+     qui si riflette nel pannello "⭐ Treni preferiti" della dashboard
+     e viceversa, ma solo sullo stesso dispositivo/browser: localStorage
+     non sincronizza tra dispositivi diversi.
      Novità v1.3: FIX bug rilevazione cancellazione — "nonPartito" NON
      significa cancellato, significa solo "non ancora partito" (stato
      normale di un treno futuro). Verificato su dato reale (treno 4610,
@@ -53,6 +90,8 @@
   .treno-header-top { display: flex; align-items: baseline; gap: 10px; }
   .treno-header .numero { font-family: var(--font-mono); font-weight: 700; font-size: 1.5rem; color: var(--amber); }
   .treno-header .categoria { font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; }
+  .btn-stella { background: none; border: none; padding: 0; font-size: 1.3rem; line-height: 1; cursor: pointer; color: var(--text-muted); margin-left: auto; }
+  .btn-stella.attiva { color: var(--amber); }
   .treno-header .tratta { font-size: 0.95rem; color: var(--text); margin-top: 8px; }
   .treno-header .tratta b { font-weight: 600; }
   .treno-header .stato-riga { display: flex; gap: 14px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 0.78rem; color: var(--text-muted); flex-wrap: wrap; }
@@ -63,28 +102,43 @@
 
   .section-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 1.5rem 0 0.6rem; padding-left: 8px; border-left: 3px solid var(--amber-dim); }
 
-  .percorso-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
-  .fermata-row { display: flex; gap: 10px; padding: 11px 12px; border-bottom: 1px solid var(--rule); }
-  .fermata-row:last-child { border-bottom: none; }
-  .fermata-row.origine, .fermata-row.destinazione { background: rgba(240,180,41,0.05); }
-  .fermata-linea { display: flex; flex-direction: column; align-items: center; padding-top: 3px; width: 12px; flex-shrink: 0; }
-  .fermata-pallino { width: 9px; height: 9px; border-radius: 50%; background: var(--rule); border: 2px solid var(--bg-panel); flex-shrink: 0; }
-  .fermata-row.origine .fermata-pallino, .fermata-row.destinazione .fermata-pallino { background: var(--amber); }
-  .fermata-linea-v { width: 2px; flex: 1; background: var(--rule); margin-top: 2px; }
-  .fermata-corpo { flex: 1; min-width: 0; }
-  .fermata-nome-riga { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-  .fermata-nome { font-size: 0.85rem; color: var(--text); }
-  .fermata-row.origine .fermata-nome, .fermata-row.destinazione .fermata-nome { font-weight: 700; color: var(--amber); }
-  .fermata-tipo-tag { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; }
-  .fermata-orari { display: flex; gap: 16px; margin-top: 4px; font-size: 0.76rem; }
-  .fermata-orari .blocco-orario { display: flex; flex-direction: column; gap: 1px; }
-  .fermata-orari .etichetta { font-size: 0.62rem; color: var(--text-muted); text-transform: uppercase; }
-  .fermata-orari .valore { font-family: var(--font-mono); color: var(--text); }
-  .fermata-orari .valore .teorico-barrato { text-decoration: line-through; color: var(--text-muted); margin-right: 4px; }
-  .fermata-orari .rit-neg { color: var(--green); }
-  .fermata-orari .rit-pos { color: var(--red); }
-  .fermata-orari .rit-zero { color: var(--text-muted); }
-  .fermata-binario { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; }
+  /* Card "posizione attuale": ultima fermata rilevata + badge ritardo,
+     promossa da riga minuscola in fondo all'header (v1.4) a card
+     prominente in stile "prossima fermata" (v1.5). */
+  .posizione-card { display: flex; justify-content: space-between; align-items: center; background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; padding: 0.9rem 1rem; margin-bottom: 1.25rem; gap: 10px; }
+  .posizione-nome { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+  .posizione-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 3px; }
+  .badge-ritardo { flex-shrink: 0; text-align: center; background: rgba(240,180,41,0.15); border: 1px solid var(--amber-dim); border-radius: 8px; padding: 6px 12px; }
+  .badge-ritardo.zero { background: rgba(76,175,125,0.12); border-color: var(--green); }
+  .badge-ritardo .valore { font-family: var(--font-mono); font-weight: 700; font-size: 1.15rem; color: var(--amber); }
+  .badge-ritardo.zero .valore { color: var(--green); font-size: 0.85rem; }
+  .badge-ritardo .etichetta { font-size: 0.6rem; text-transform: uppercase; color: var(--text-muted); margin-top: 1px; }
+
+  /* Timeline percorso: colonna pallino+linea a sinistra, corpo con
+     nome stazione + binario in cima, orari arrivo/partenza affiancati
+     sotto. Sostituisce lo stile "elenco puntato" della v1.x precedente. */
+  .percorso-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; padding: 4px 0; }
+  .tl-row { display: flex; gap: 10px; padding: 10px 12px; }
+  .tl-linea { display: flex; flex-direction: column; align-items: center; width: 12px; flex-shrink: 0; }
+  .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--rule); border: 2px solid var(--bg-panel); flex-shrink: 0; margin-top: 2px; }
+  .tl-dot.passata { background: var(--amber); }
+  .tl-dot.corrente { background: var(--amber); width: 13px; height: 13px; box-shadow: 0 0 0 3px rgba(240,180,41,0.25); }
+  .tl-bar { width: 3px; flex: 1; background: var(--rule); margin-top: 3px; border-radius: 2px; }
+  .tl-bar.passata { background: var(--amber-dim); }
+  .tl-corpo { flex: 1; min-width: 0; }
+  .tl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .tl-nome { font-size: 0.82rem; color: var(--text); }
+  .tl-row.origine .tl-nome, .tl-row.destinazione .tl-nome { font-weight: 700; color: var(--amber); }
+  .tl-row.corrente .tl-nome { font-weight: 700; color: var(--amber); }
+  .tl-bin { font-size: 0.66rem; color: var(--text-muted); flex-shrink: 0; }
+  .tl-orari { display: flex; gap: 18px; margin-top: 5px; }
+  .tl-blocco { display: flex; flex-direction: column; gap: 1px; }
+  .tl-lbl { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; }
+  .tl-teorico { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+  .tl-reale { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; }
+  .tl-reale.confermato { color: var(--text); }
+  .tl-reale.proiettato { color: var(--green); }
+  .tl-reale.proiettato.in-ritardo { color: var(--amber); }
 
   .loading, .vuoto, .errore { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.85rem; }
   .errore { color: var(--red); }
@@ -104,56 +158,68 @@
     <div id="treniHeaderEl"><div class="loading">Caricamento treno...</div></div>
   </header>
 
+  <div id="posizioneEl"></div>
+
   <div class="section-label">📍 Percorso completo</div>
   <div class="percorso-wrap" id="percorsoEl"><div class="loading">Caricamento fermate...</div></div>
 
   <footer>
     Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI<br>
-    <span class="footer-rev">dettaglio_treno.html v1.3</span>
+    <span class="footer-rev">dettaglio_treno.html v1.5</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.3 (2026-09-07)
-// Vedi commento di versione nel <style> per il changelog completo.
+// dettaglio_treno.html — v1.5 (2026-09-08)
+// Novità v1.5: redesign timeline (card posizione attuale, percorso a
+// tabella con orari proiettati per fermate future). Vedi commento di
+// versione nel <style> per il changelog completo.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
 const params = new URLSearchParams(window.location.search);
 const numeroTreno = params.get('numero');
 
+// Stessa chiave localStorage di dashboard_live.html (monitorLive.
+// treniPreferiti) cosi' marcare/smarcare qui si riflette anche nel
+// pannello "⭐ Treni preferiti" della dashboard principale, sullo
+// stesso dispositivo/browser. NON e' sincronizzato tra dispositivi
+// diversi: localStorage e' locale al singolo browser.
+function ePreferito(num) {
+  try {
+    const grezzo = localStorage.getItem('monitorLive.treniPreferiti');
+    const lista = grezzo ? JSON.parse(grezzo) : [];
+    return lista.includes(String(num));
+  } catch { return false; }
+}
+
+function toggleFavoritoPagina() {
+  if (!numeroTreno) return;
+  try {
+    const grezzo = localStorage.getItem('monitorLive.treniPreferiti');
+    let lista = grezzo ? JSON.parse(grezzo) : [];
+    const num = String(numeroTreno);
+    if (lista.includes(num)) {
+      lista = lista.filter(n => n !== num);
+    } else {
+      lista.push(num);
+    }
+    localStorage.setItem('monitorLive.treniPreferiti', JSON.stringify(lista));
+  } catch { return; }
+
+  const btn = document.getElementById('btnStella');
+  if (btn) {
+    const attivo = ePreferito(numeroTreno);
+    btn.classList.toggle('attiva', attivo);
+    btn.textContent = attivo ? '★' : '☆';
+  }
+}
+
 function formattaOrario(ms) {
   if (!ms || ms <= 0) return null;
   const d = new Date(ms);
   return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-}
-
-function formattaRitardo(min) {
-  if (min === null || min === undefined) return '';
-  if (min === 0) return `<span class="rit-zero">in orario</span>`;
-  const cls = min > 0 ? 'rit-pos' : 'rit-neg';
-  const segno = min > 0 ? '+' : '';
-  return `<span class="${cls}">${segno}${min}'</span>`;
-}
-
-function blocccoOrario(etichetta, teorico, reale, ritardo) {
-  const oraTeorica = formattaOrario(teorico);
-  const oraReale = formattaOrario(reale);
-  if (!oraTeorica && !oraReale) return '';
-
-  let valoreHtml;
-  if (oraReale && oraReale !== oraTeorica) {
-    valoreHtml = `<span class="teorico-barrato">${oraTeorica}</span>${oraReale} ${formattaRitardo(ritardo)}`;
-  } else {
-    valoreHtml = `${oraTeorica || oraReale} ${ritardo !== null && ritardo !== undefined ? formattaRitardo(ritardo) : ''}`;
-  }
-
-  return `
-    <div class="blocco-orario">
-      <div class="etichetta">${etichetta}</div>
-      <div class="valore">${valoreHtml}</div>
-    </div>`;
 }
 
 function renderHeader(json) {
@@ -165,7 +231,6 @@ function renderHeader(json) {
   const categoria = json.categoria || json.tipoTreno || '';
   const oraPartenza = formattaOrario(json.orarioPartenza);
   const oraArrivo = formattaOrario(json.orarioArrivo);
-  const ritardoAttuale = (json.ritardo !== undefined && json.ritardo !== null) ? json.ritardo : null;
 
   // FIX v1.2: "circolante" indica se il treno esiste in orario, NON se
   // la corsa di oggi e' stata cancellata. Verificato su dato reale:
@@ -187,18 +252,15 @@ function renderHeader(json) {
   // se effettivamente valorizzato.
   const motivoRitardo = json.motivoRitardoPrevalente;
 
-  // Ultimo rilevamento GPS: valido anche quando il treno e' tra due
-  // stazioni, non solo quando e' fermo a una fermata programmata.
-  const ultimoRilevamentoStazione = json.stazioneUltimoRilevamento;
-  const ultimoRilevamentoOra = json.compOraUltimoRilevamento;
-  const mostraUltimoRilevamento = ultimoRilevamentoStazione && ultimoRilevamentoStazione !== '--'
-    && ultimoRilevamentoOra && ultimoRilevamentoOra !== '--';
+  // Ultimo rilevamento GPS spostato nella card dedicata renderPosizioneAttuale()
+  // (v1.5) — qui restava una riga minuscola in fondo, poco visibile.
 
   el.innerHTML = `
     <div class="treno-header">
       <div class="treno-header-top">
         <span class="numero">${json.numeroTreno || numeroTreno}</span>
         <span class="categoria">${categoria}</span>
+        <button class="btn-stella ${ePreferito(numeroTreno) ? 'attiva' : ''}" id="btnStella" onclick="toggleFavoritoPagina()" title="Aggiungi/rimuovi dai preferiti">${ePreferito(numeroTreno) ? '★' : '☆'}</button>
       </div>
       <div class="tratta"><b>${origine}</b> → <b>${destinazione}</b></div>
       ${cancellato ? '<div class="badge-non-circolante">Treno cancellato</div>' : ''}
@@ -206,10 +268,44 @@ function renderHeader(json) {
       <div class="stato-riga">
         ${oraPartenza ? `<span>Partenza <b>${oraPartenza}</b></span>` : ''}
         ${oraArrivo ? `<span>Arrivo <b>${oraArrivo}</b></span>` : ''}
-        ${!cancellato && ritardoAttuale !== null ? `<span>Ritardo attuale ${formattaRitardo(ritardoAttuale)}</span>` : ''}
       </div>
       ${motivoRitardo ? `<div class="motivo-riga">Causa: ${motivoRitardo}</div>` : ''}
-      ${mostraUltimoRilevamento ? `<div class="rilevamento-riga">📡 Ultimo rilevamento: <b style="color:var(--text)">${ultimoRilevamentoStazione}</b> alle ${ultimoRilevamentoOra}</div>` : ''}
+    </div>`;
+}
+
+// Card "posizione attuale" (v1.5): promuove l'ultimo rilevamento GPS
+// (prima riga minuscola in fondo all'header) a card prominente con
+// badge ritardo, ispirata al layout "prossima fermata" di altre app
+// di monitoraggio treni. Mostrata solo se il dato e' disponibile
+// (treno gia' partito e con almeno un rilevamento valido) e il treno
+// non e' cancellato.
+function renderPosizioneAttuale(json) {
+  const el = document.getElementById('posizioneEl');
+
+  const cancellato = json.subTitle === 'Treno cancellato';
+  const stazione = json.stazioneUltimoRilevamento;
+  const ora = json.compOraUltimoRilevamento;
+  const valido = !cancellato && stazione && stazione !== '--' && ora && ora !== '--';
+
+  if (!valido) { el.innerHTML = ''; return; }
+
+  const ritardo = (typeof json.ritardo === 'number') ? json.ritardo : null;
+  let badgeHtml = '';
+  if (ritardo !== null) {
+    if (ritardo <= 0) {
+      badgeHtml = `<div class="badge-ritardo zero"><div class="valore">${ritardo < 0 ? ritardo : 'In orario'}</div>${ritardo < 0 ? '<div class="etichetta">anticipo</div>' : ''}</div>`;
+    } else {
+      badgeHtml = `<div class="badge-ritardo"><div class="valore">+${ritardo}</div><div class="etichetta">Ritardo</div></div>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div class="posizione-card">
+      <div>
+        <div class="posizione-nome">${stazione}</div>
+        <div class="posizione-sub">Ultimo rilevamento: ${ora}</div>
+      </div>
+      ${badgeHtml}
     </div>`;
 }
 
@@ -227,44 +323,81 @@ function renderPercorso(json) {
     return;
   }
 
+  // Fermata "corrente" = quella dell'ultimo rilevamento GPS (stesso
+  // dato usato dalla card renderPosizioneAttuale). Se non troviamo un
+  // match esatto sul nome (o il treno non e' ancora partito), nessuna
+  // riga viene evidenziata come "corrente" — non e' un errore, solo un
+  // dato che ViaggiaTreno non fornisce sempre.
+  const nomeRilevamento = (json.stazioneUltimoRilevamento || '').trim().toUpperCase();
+  const indiceCorrente = nomeRilevamento
+    ? fermate.findIndex(f => (f.stazione || '').trim().toUpperCase() === nomeRilevamento)
+    : -1;
+
+  const ritardoComplessivo = (typeof json.ritardo === 'number') ? json.ritardo : 0;
+
   el.innerHTML = fermate.map((f, i) => {
     const isOrigine = i === 0;
     const isDestinazione = i === fermate.length - 1;
-    const tipo = isOrigine ? 'origine' : isDestinazione ? 'destinazione' : '';
-
-    // Per le fermate intermedie, distinguiamo se il treno e' gia' transitato
-    // o deve ancora passare, confrontando l'orario di partenza (o arrivo se
-    // e' l'ultima fermata prima della destinazione) con l'ora attuale.
-    let tipoLabel = isOrigine ? 'Partenza' : isDestinazione ? 'Arrivo' : 'Transito';
-    if (!isOrigine && !isDestinazione) {
-      const epocaRiferimento = f.partenzaReale || f.partenza_teorica || f.arrivoReale || f.arrivo_teorico;
-      if (epocaRiferimento && epocaRiferimento < Date.now()) tipoLabel = 'Transitato';
-    }
+    const isCorrente = i === indiceCorrente;
+    const isPassata = indiceCorrente >= 0 && i <= indiceCorrente;
+    const tipo = [isOrigine ? 'origine' : '', isDestinazione ? 'destinazione' : '', isCorrente ? 'corrente' : ''].filter(Boolean).join(' ');
 
     const binario = f.binarioEffettivoArrivoDescrizione || f.binarioProgrammatoArrivoDescrizione
       || f.binarioEffettivoPartenzaDescrizione || f.binarioProgrammatoPartenzaDescrizione;
 
     const blocchi = [
-      !isOrigine ? blocccoOrario('Arrivo', f.arrivo_teorico, f.arrivoReale, f.ritardoArrivo) : '',
-      !isDestinazione ? blocccoOrario('Partenza', f.partenza_teorica, f.partenzaReale, f.ritardoPartenza) : '',
+      !isOrigine ? blocccoOrarioTimeline('Arrivo', f.arrivo_teorico, f.arrivoReale, ritardoComplessivo) : '',
+      !isDestinazione ? blocccoOrarioTimeline('Partenza', f.partenza_teorica, f.partenzaReale, ritardoComplessivo) : '',
     ].filter(Boolean).join('');
 
     return `
-      <div class="fermata-row ${tipo}">
-        <div class="fermata-linea">
-          <div class="fermata-pallino"></div>
-          ${!isDestinazione ? '<div class="fermata-linea-v"></div>' : ''}
+      <div class="tl-row ${tipo}">
+        <div class="tl-linea">
+          <div class="tl-dot ${isPassata ? 'passata' : ''} ${isCorrente ? 'corrente' : ''}"></div>
+          ${!isDestinazione ? `<div class="tl-bar ${isPassata && i < indiceCorrente ? 'passata' : ''}"></div>` : ''}
         </div>
-        <div class="fermata-corpo">
-          <div class="fermata-nome-riga">
-            <span class="fermata-nome">${f.stazione || '—'}</span>
-            <span class="fermata-tipo-tag">${tipoLabel}</span>
+        <div class="tl-corpo">
+          <div class="tl-top">
+            <span class="tl-nome">${f.stazione || '—'}</span>
+            ${binario ? `<span class="tl-bin">Bin. ${binario}</span>` : ''}
           </div>
-          <div class="fermata-orari">${blocchi}</div>
-          ${binario ? `<div class="fermata-binario">Binario ${binario}</div>` : ''}
+          <div class="tl-orari">${blocchi}</div>
         </div>
       </div>`;
   }).join('');
+}
+
+// Blocco orario per una singola cella (Arrivo o Partenza) della
+// timeline. Se il dato reale non c'e' ancora (fermata non raggiunta),
+// proiettiamo l'orario teorico sommando il ritardo complessivo attuale
+// del treno — e' una stima, non un dato confermato da ViaggiaTreno,
+// per questo colorata diversamente (verde/ambra) dall'orario
+// confermato (bianco). Se il treno e' in orario la proiezione coincide
+// col teorico, quindi la distinzione visiva resta comunque onesta.
+function blocccoOrarioTimeline(etichetta, teoricoMs, realeMs, ritardoComplessivo) {
+  if (!teoricoMs && !realeMs) return '';
+
+  const teoricoTxt = formattaOrario(teoricoMs);
+  let valoreTxt, classe;
+
+  if (realeMs) {
+    valoreTxt = formattaOrario(realeMs);
+    classe = 'confermato';
+  } else if (teoricoMs) {
+    const proiettatoMs = teoricoMs + (ritardoComplessivo * 60000);
+    valoreTxt = formattaOrario(proiettatoMs);
+    classe = ritardoComplessivo > 0 ? 'proiettato in-ritardo' : 'proiettato';
+  } else {
+    valoreTxt = teoricoTxt;
+    classe = 'proiettato';
+  }
+
+  return `
+    <div class="tl-blocco">
+      <span class="tl-lbl">${etichetta}</span>
+      ${teoricoTxt ? `<span class="tl-teorico">${teoricoTxt}</span>` : ''}
+      <span class="tl-reale ${classe}">${valoreTxt}</span>
+    </div>`;
 }
 
 async function caricaDettaglio() {
@@ -285,6 +418,7 @@ async function caricaDettaglio() {
     }
 
     renderHeader(json);
+    renderPosizioneAttuale(json);
     renderPercorso(json);
 
   } catch (errore) {
