@@ -10,12 +10,46 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_treno.html — v1.5 (2026-09-08)
+     dettaglio_treno.html — v1.7 (2026-09-10)
      Pagina standalone: percorso completo di un treno (tutte le
      fermate, orari teorici/reali, ritardi, binari). Aperta in nuova
      scheda dal click sul numero treno nel Monitor RFI.
      Dati da: DENO_URL/treno/{numero} (proxy ViaggiaTreno andamentoTreno).
      Stessa identità cromatica (ambra) del modulo Treni di dashboard_live.html.
+     Novità v1.7: fermate cliccabili nella timeline. Ogni nome fermata
+     con un match in stazioni_ridotte.json (nuovo file, da ospitare
+     nella stessa cartella su GitHub Pages — sottoinsieme di 459
+     stazioni: Lazio+Umbria per intero, tutte le stazioni MAIN
+     HUB/HUB/MAJOR secondo la classificazione ufficiale RFI, piu' i
+     capoluoghi di provincia) apre in nuova scheda il tabellone di
+     quella stazione tramite la nuova pagina tabellone_stazione.html.
+     Se una fermata non ha match (fuori dal sottoinsieme ridotto)
+     resta semplicemente testo non cliccabile — degrado consapevole,
+     non un errore: coprire tutte le 2958 stazioni italiane avrebbe
+     richiesto caricare un file molto piu' pesante per un beneficio
+     marginale sulle fermate davvero rilevanti per l'uso quotidiano.
+     Matching per nome normalizzato (accenti/punteggiatura/trattini
+     rimossi) tra il nome fermata di ViaggiaTreno e il nome nel file
+     stazioni_ridotte.json, che possono differire leggermente nella
+     forma esatta pur riferendosi alla stessa stazione.
+     Novità v1.6: ritardo per-fermata (non solo il ritardo complessivo
+     nella card in alto). Ogni cella Arrivo/Partenza mostra ora un
+     piccolo chip +X'/-X'/in orario accanto all'orario. Per le fermate
+     gia' raggiunte uso il ritardo SPECIFICO di quella fermata
+     (f.ritardoArrivo/f.ritardoPartenza, calcolato da ViaggiaTreno);
+     per le fermate future, non essendoci un dato specifico affidabile
+     (verificato su JSON reali: resta 0 come placeholder finche' il
+     treno non arriva), uso la stessa stima "ritardo complessivo" gia'
+     usata per la proiezione dell'orario — cosi' i due numeri sulla
+     riga restano coerenti tra loro.
+     Aggiunta anche la distinzione "fermo in stazione": uso il campo
+     json.inStazione (gia' presente nei dati ViaggiaTreno, prima mai
+     sfruttato in questa pagina) per capire se il treno e' fermo
+     proprio alla fermata corrente. In quel caso la cella Partenza non
+     mostra piu' un orario proiettato (che sarebbe falsa precisione,
+     il tempo di sosta reale non e' prevedibile), ma l'indicazione
+     "● in stazione" — la cella Arrivo invece resta normale, essendo
+     gia' un dato confermato in quel momento.
      Novità v1.5: redesign visivo completo, ispirato al layout a
      timeline di altre app di monitoraggio treni (screenshot fornito
      dall'utente). Cambia la STRUTTURA: nuova card "posizione attuale"
@@ -130,6 +164,8 @@
   .tl-nome { font-size: 0.82rem; color: var(--text); }
   .tl-row.origine .tl-nome, .tl-row.destinazione .tl-nome { font-weight: 700; color: var(--amber); }
   .tl-row.corrente .tl-nome { font-weight: 700; color: var(--amber); }
+  a.tl-nome { text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--text-muted); text-underline-offset: 3px; cursor: pointer; }
+  a.tl-nome:active { color: var(--amber); }
   .tl-bin { font-size: 0.66rem; color: var(--text-muted); flex-shrink: 0; }
   .tl-orari { display: flex; gap: 18px; margin-top: 5px; }
   .tl-blocco { display: flex; flex-direction: column; gap: 1px; }
@@ -139,6 +175,11 @@
   .tl-reale.confermato { color: var(--text); }
   .tl-reale.proiettato { color: var(--green); }
   .tl-reale.proiettato.in-ritardo { color: var(--amber); }
+  .tl-delta { font-family: var(--font-mono); font-size: 0.66rem; margin-left: 4px; }
+  .tl-delta.pos { color: var(--amber); }
+  .tl-delta.neg { color: var(--green); }
+  .tl-delta.zero { color: var(--text-muted); }
+  .tl-in-stazione { font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: var(--amber); }
 
   .loading, .vuoto, .errore { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.85rem; }
   .errore { color: var(--red); }
@@ -165,21 +206,52 @@
 
   <footer>
     Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI<br>
-    <span class="footer-rev">dettaglio_treno.html v1.5</span>
+    <span class="footer-rev">dettaglio_treno.html v1.7</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.5 (2026-09-08)
-// Novità v1.5: redesign timeline (card posizione attuale, percorso a
-// tabella con orari proiettati per fermate future). Vedi commento di
-// versione nel <style> per il changelog completo.
+// dettaglio_treno.html — v1.7 (2026-09-10)
+// Novità v1.7: fermate cliccabili -> tabellone_stazione.html in nuova
+// scheda (richiede stazioni_ridotte.json nella stessa cartella). Vedi
+// commento di versione nel <style> per il changelog completo.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
 const params = new URLSearchParams(window.location.search);
 const numeroTreno = params.get('numero');
+
+// Mappa nome-stazione -> placeIdRFI/codiceViaggiaTreno, per rendere
+// cliccabile ogni fermata della timeline (v1.7). Il file e' un
+// sottoinsieme ridotto (Lazio+Umbria + stazioni MAIN HUB/HUB/MAJOR
+// secondo la classificazione ufficiale RFI + capoluoghi di provincia),
+// non tutte le 2958 stazioni italiane — se una fermata non ha match,
+// resta semplicemente testo non cliccabile, non e' un errore.
+// Va ospitato nella STESSA cartella di questo file su GitHub Pages.
+let mappaStazioni = new Map();
+
+function normalizzaNomeStazione(nome) {
+  return (nome || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '') // rimuove accenti
+    .toUpperCase()
+    .replace(/['.]/g, '')
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function caricaMappaStazioni() {
+  try {
+    const risposta = await fetch('./stazioni_ridotte.json');
+    const lista = await risposta.json();
+    lista.forEach(s => mappaStazioni.set(normalizzaNomeStazione(s.nome), s));
+  } catch {
+    // Silenzioso: se il file non c'e'/non risponde, le fermate restano
+    // semplicemente non cliccabili — degrado controllato, non un errore
+    // da mostrare all'utente per una funzione accessoria.
+  }
+}
 
 // Stessa chiave localStorage di dashboard_live.html (monitorLive.
 // treniPreferiti) cosi' marcare/smarcare qui si riflette anche nel
@@ -335,6 +407,16 @@ function renderPercorso(json) {
 
   const ritardoComplessivo = (typeof json.ritardo === 'number') ? json.ritardo : 0;
 
+  // json.inStazione (campo ViaggiaTreno gia' presente, prima inutilizzato
+  // in questa pagina) dice se il treno e' FERMO a una stazione in questo
+  // momento, invece che in transito tra due fermate. Se e' fermo proprio
+  // alla fermata corrente e non ha ancora un orario di partenza reale,
+  // non ha senso proiettare un orario di partenza preciso (v1.5 lo
+  // avrebbe mostrato come "teorico + ritardo attuale", ma il tempo di
+  // sosta e' variabile e imprevedibile) — mostriamo invece "in stazione",
+  // onesto sul fatto che non sappiamo ancora quando ripartira'.
+  const fermoInStazione = json.inStazione === true;
+
   el.innerHTML = fermate.map((f, i) => {
     const isOrigine = i === 0;
     const isDestinazione = i === fermate.length - 1;
@@ -345,9 +427,19 @@ function renderPercorso(json) {
     const binario = f.binarioEffettivoArrivoDescrizione || f.binarioProgrammatoArrivoDescrizione
       || f.binarioEffettivoPartenzaDescrizione || f.binarioProgrammatoPartenzaDescrizione;
 
+    const fermoQui = isCorrente && fermoInStazione && !f.partenzaReale;
+
+    // Fermata cliccabile -> apre tabellone_stazione.html in nuova
+    // scheda, solo se troviamo un match con placeIdRFI valorizzato
+    // (senza placeId non sappiamo che tabellone RFI interrogare).
+    const infoStazione = mappaStazioni.get(normalizzaNomeStazione(f.stazione));
+    const nomeHtml = (infoStazione && infoStazione.placeIdRFI)
+      ? `<a class="tl-nome" href="tabellone_stazione.html?placeId=${infoStazione.placeIdRFI}&nome=${encodeURIComponent(f.stazione)}" target="_blank" rel="noopener">${f.stazione || '—'}</a>`
+      : `<span class="tl-nome">${f.stazione || '—'}</span>`;
+
     const blocchi = [
-      !isOrigine ? blocccoOrarioTimeline('Arrivo', f.arrivo_teorico, f.arrivoReale, ritardoComplessivo) : '',
-      !isDestinazione ? blocccoOrarioTimeline('Partenza', f.partenza_teorica, f.partenzaReale, ritardoComplessivo) : '',
+      !isOrigine ? blocccoOrarioTimeline('Arrivo', f.arrivo_teorico, f.arrivoReale, ritardoComplessivo, f.ritardoArrivo) : '',
+      !isDestinazione ? (fermoQui ? bloccoInStazione() : blocccoOrarioTimeline('Partenza', f.partenza_teorica, f.partenzaReale, ritardoComplessivo, f.ritardoPartenza)) : '',
     ].filter(Boolean).join('');
 
     return `
@@ -358,7 +450,7 @@ function renderPercorso(json) {
         </div>
         <div class="tl-corpo">
           <div class="tl-top">
-            <span class="tl-nome">${f.stazione || '—'}</span>
+            ${nomeHtml}
             ${binario ? `<span class="tl-bin">Bin. ${binario}</span>` : ''}
           </div>
           <div class="tl-orari">${blocchi}</div>
@@ -374,29 +466,62 @@ function renderPercorso(json) {
 // per questo colorata diversamente (verde/ambra) dall'orario
 // confermato (bianco). Se il treno e' in orario la proiezione coincide
 // col teorico, quindi la distinzione visiva resta comunque onesta.
-function blocccoOrarioTimeline(etichetta, teoricoMs, realeMs, ritardoComplessivo) {
+//
+// v1.6: aggiunto il chip di ritardo accanto all'orario. Quando la
+// fermata e' gia' stata raggiunta, uso il ritardo SPECIFICO di quella
+// fermata (f.ritardoArrivo / f.ritardoPartenza, dato reale gia'
+// calcolato da ViaggiaTreno) — non quello complessivo del treno, che
+// puo' differire fermata per fermata. Per le fermate future, non c'e'
+// un dato specifico affidabile (abbiamo verificato su dati reali che
+// resta a 0 come placeholder finche' il treno non arriva), quindi il
+// chip usa la stessa stima "ritardo complessivo" gia' usata per la
+// proiezione dell'orario, per coerenza tra i due numeri sulla riga.
+function blocccoOrarioTimeline(etichetta, teoricoMs, realeMs, ritardoComplessivo, ritardoSpecifico) {
   if (!teoricoMs && !realeMs) return '';
 
   const teoricoTxt = formattaOrario(teoricoMs);
-  let valoreTxt, classe;
+  let valoreTxt, classe, ritardoMostrato;
 
   if (realeMs) {
     valoreTxt = formattaOrario(realeMs);
     classe = 'confermato';
+    ritardoMostrato = (typeof ritardoSpecifico === 'number') ? ritardoSpecifico : null;
   } else if (teoricoMs) {
     const proiettatoMs = teoricoMs + (ritardoComplessivo * 60000);
     valoreTxt = formattaOrario(proiettatoMs);
     classe = ritardoComplessivo > 0 ? 'proiettato in-ritardo' : 'proiettato';
+    ritardoMostrato = ritardoComplessivo;
   } else {
     valoreTxt = teoricoTxt;
     classe = 'proiettato';
+    ritardoMostrato = null;
   }
 
   return `
     <div class="tl-blocco">
       <span class="tl-lbl">${etichetta}</span>
       ${teoricoTxt ? `<span class="tl-teorico">${teoricoTxt}</span>` : ''}
-      <span class="tl-reale ${classe}">${valoreTxt}</span>
+      <span class="tl-reale ${classe}">${valoreTxt}${formattaDelta(ritardoMostrato)}</span>
+    </div>`;
+}
+
+function formattaDelta(min) {
+  if (min === null || min === undefined) return '';
+  if (min === 0) return `<span class="tl-delta zero">in orario</span>`;
+  const cls = min > 0 ? 'pos' : 'neg';
+  const segno = min > 0 ? '+' : '';
+  return `<span class="tl-delta ${cls}">${segno}${min}'</span>`;
+}
+
+// Cella "in stazione": usata al posto della partenza proiettata quando
+// il treno e' fermo proprio a questa fermata e non e' ancora ripartito
+// — un orario di partenza proiettato sarebbe falsa precisione, il
+// tempo di sosta effettivo non e' prevedibile dai dati che abbiamo.
+function bloccoInStazione() {
+  return `
+    <div class="tl-blocco">
+      <span class="tl-lbl">Partenza</span>
+      <span class="tl-in-stazione">● in stazione</span>
     </div>`;
 }
 
@@ -408,8 +533,11 @@ async function caricaDettaglio() {
   }
 
   try {
-    const risposta = await fetch(`${DENO_URL}/treno/${encodeURIComponent(numeroTreno)}`);
-    const json = await risposta.json();
+    const [rispostaTreno] = await Promise.all([
+      fetch(`${DENO_URL}/treno/${encodeURIComponent(numeroTreno)}`),
+      caricaMappaStazioni(),
+    ]);
+    const json = await rispostaTreno.json();
 
     if (json.errore) {
       document.getElementById('treniHeaderEl').innerHTML = `<div class="errore">${json.errore}</div>`;

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#14171c">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚉</text></svg>">
+<title>Tabellone stazione — Monitor Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ================================================================
+     tabellone_stazione.html — v1.0 (2026-09-10)
+     Pagina standalone: tabellone RFI (partenze/arrivi) per UNA
+     stazione qualsiasi identificata da placeId — non solo le poche
+     stazioni configurate come tab in dashboard_live.html. Aperta in
+     nuova scheda dal click su una fermata intermedia nella timeline
+     di dettaglio_treno.html (v1.7).
+     Parametri URL: ?placeId=NNN&nome=NOME (nome solo per il titolo,
+     placeId e' l'unico dato realmente necessario per la fetch).
+     Dati da: DENO_URL/rfi-tabellone/{placeId} (stesso endpoint usato
+     dal modulo Treni di dashboard_live.html). Solo fonte RFI, niente
+     arricchimento ViaggiaTreno dual-source qui — questa e' una pagina
+     di consultazione rapida per stazioni non abituali, non il
+     tabellone principale: teniamola volutamente piu' semplice.
+     Stessa identita' cromatica (ambra) del resto del modulo treni.
+     ================================================================ */
+  :root {
+    --bg: #14171c;
+    --bg-panel: #1c2029;
+    --rule: #2a2f3a;
+    --amber: #f0b429;
+    --amber-dim: #a8801f;
+    --text: #e8e6df;
+    --text-muted: #7d828c;
+    --red: #e2574c;
+    --green: #4caf7d;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+
+  header { padding: 1.25rem 0 1rem; border-bottom: 1px solid var(--rule); margin-bottom: 1rem; }
+  .btn-indietro { background: none; border: none; color: var(--text-muted); font-size: 0.8rem; padding: 0; cursor: pointer; font-family: var(--font-sans); margin-bottom: 10px; }
+  .stazione-nome { font-size: 1.3rem; font-weight: 700; color: var(--amber); }
+
+  .toggle-pa { display: flex; gap: 8px; margin: 0.9rem 0; }
+  .toggle-pa button { flex: 1; padding: 8px 0; background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 8px; color: var(--text-muted); font-family: var(--font-sans); font-weight: 600; font-size: 0.82rem; cursor: pointer; }
+  .toggle-pa button.attivo { background: rgba(240,180,41,0.12); border-color: var(--amber-dim); color: var(--amber); }
+
+  .treno-list-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+  .treno-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--rule); gap: 8px; text-decoration: none; color: inherit; cursor: pointer; }
+  .treno-row:active { background: rgba(255,255,255,0.03); }
+  .treno-row:last-child { border-bottom: none; }
+  .treno-sx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .treno-num-riga { display: flex; align-items: baseline; gap: 6px; }
+  .treno-num { font-family: var(--font-mono); color: var(--amber); font-weight: 700; font-size: 0.85rem; }
+  .treno-cat { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; }
+  .treno-dest { font-size: 0.8rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .treno-dx { text-align: right; flex-shrink: 0; }
+  .treno-orario { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; }
+  .treno-bin { font-size: 0.68rem; color: var(--text-muted); }
+  .treno-stato { font-size: 0.66rem; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
+  .stato-in_orario { color: var(--green); }
+  .stato-ritardo { color: var(--amber); }
+  .stato-cancellato { color: var(--red); font-weight: 700; }
+  .stato-sconosciuto { color: var(--text-muted); }
+
+  .rfi-link-esterno { display: block; text-align: center; font-size: 0.72rem; color: var(--text-muted); padding: 12px 0 4px; }
+  .rfi-link-esterno a { color: var(--text-muted); }
+
+  .loading, .vuoto, .errore { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.85rem; }
+  .errore { color: var(--red); }
+
+  footer { text-align: center; font-size: 0.68rem; color: var(--text-muted); margin-top: 2rem; font-family: var(--font-mono); line-height: 1.7; }
+  .footer-rev { opacity: 0.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <button class="btn-indietro" onclick="window.close()">← Chiudi scheda</button>
+  <header>
+    <div class="stazione-nome" id="nomeStazioneEl">—</div>
+  </header>
+
+  <div class="toggle-pa" id="togglePA">
+    <button id="btnPartenze" onclick="selModalita('partenze')">Partenze</button>
+    <button id="btnArrivi" onclick="selModalita('arrivi')">Arrivi</button>
+  </div>
+  <div class="treno-list-wrap">
+    <div id="treniEl"><div class="loading">Caricamento...</div></div>
+  </div>
+  <div class="rfi-link-esterno" id="rfiLinkEsterno"></div>
+
+  <footer>
+    Dati Monitor RFI (via proxy Deno) · pagina generata dal click su una fermata<br>
+    <span class="footer-rev">tabellone_stazione.html v1.0</span>
+  </footer>
+</div>
+
+<script>
+// ================================================================
+// tabellone_stazione.html — v1.0 (2026-09-10)
+// Vedi commento di versione nel <style> per i dettagli.
+// ================================================================
+const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
+
+const params = new URLSearchParams(window.location.search);
+const placeId = params.get('placeId');
+const nomeStazione = params.get('nome') || 'Stazione';
+
+let modalitaAttiva = 'partenze';
+
+document.title = `${nomeStazione} — Monitor Live`;
+document.getElementById('nomeStazioneEl').textContent = nomeStazione;
+
+function renderTogglePA() {
+  document.getElementById('btnPartenze').classList.toggle('attivo', modalitaAttiva === 'partenze');
+  document.getElementById('btnArrivi').classList.toggle('attivo', modalitaAttiva === 'arrivi');
+}
+
+function selModalita(modalita) {
+  modalitaAttiva = modalita;
+  renderTogglePA();
+  caricaTabellone();
+}
+
+function aggiornaLinkRfi() {
+  const arrivals = modalitaAttiva === 'arrivi';
+  const url = `https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Monitor?placeId=${placeId}&arrivals=${arrivals}`;
+  document.getElementById('rfiLinkEsterno').innerHTML =
+    `<a href="${url}" target="_blank" rel="noopener">Apri il tabellone ufficiale RFI ↗</a>`;
+}
+
+function formattaStatoTreno(t) {
+  const stato = t.stato || 'sconosciuto';
+  const mappaTesto = {
+    in_orario: 'In orario',
+    ritardo: t.ritardoAriaLabel || (t.ritardoTesto ? `Ritardo ${t.ritardoTesto}'` : 'In ritardo'),
+    cancellato: 'Cancellato',
+    sconosciuto: '—'
+  };
+  return `<div class="treno-stato stato-${stato}">${mappaTesto[stato] || stato}</div>`;
+}
+
+async function caricaTabellone() {
+  const el = document.getElementById('treniEl');
+
+  if (!placeId) {
+    el.innerHTML = '<div class="errore">Nessuna stazione specificata nell\'URL (manca ?placeId=...)</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="loading">Caricamento tabellone...</div>';
+  aggiornaLinkRfi();
+
+  try {
+    const arrivals = modalitaAttiva === 'arrivi';
+    const risposta = await fetch(`${DENO_URL}/rfi-tabellone/${placeId}?arrivals=${arrivals}`);
+    const json = await risposta.json();
+
+    if (json.errore) {
+      el.innerHTML = `<div class="errore">Errore: ${json.errore}</div>`;
+      return;
+    }
+
+    const lista = Array.isArray(json) ? json : (json.treni || []);
+
+    if (lista.length === 0) {
+      el.innerHTML = '<div class="vuoto">Nessun treno nella finestra attuale</div>';
+      return;
+    }
+
+    el.innerHTML = lista.map(t => {
+      const binario = t.binario || '—';
+      return `
+        <a class="treno-row" href="dettaglio_treno.html?numero=${t.numeroTreno}" target="_blank" rel="noopener">
+          <div class="treno-sx">
+            <div class="treno-num-riga">
+              <span class="treno-num">${t.numeroTreno}</span>
+              <span class="treno-cat">${t.operatore || ''} ${t.categoria || ''}</span>
+            </div>
+            <div class="treno-dest">${t.stazione || '—'}</div>
+          </div>
+          <div class="treno-dx">
+            <div class="treno-orario">${t.orario || '—'}</div>
+            <div class="treno-bin">bin. ${binario}</div>
+            ${formattaStatoTreno(t)}
+          </div>
+        </a>`;
+    }).join('');
+
+  } catch (errore) {
+    el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
+  }
+}
+
+renderTogglePA();
+caricaTabellone();
+</script>
+</body>
+</html>
