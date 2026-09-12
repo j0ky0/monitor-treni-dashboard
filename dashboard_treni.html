@@ -10,41 +10,26 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.11 (2026-09-11)
+     dashboard_treni.html — v1.0 (2026-09-11)
+     Vista "solo treni" di Monitor Live: stesso codice e stesso
+     modulo Treni di dashboard_live.html, con il modulo Bus rimosso
+     dall'HTML e le relative chiamate JS a livello globale disattivate
+     (le funzioni bus restano definite ma inutilizzate — piu' sicuro
+     che rimuoverle chirurgicamente da un file cosi' denso). Derivato
+     da dashboard_live.html v1.11 (2026-09-11). Nav discreto sotto
+     l'orologio per passare a "vista completa" o "solo bus".
+     Lo storico versioni qui sotto (v1.x) e' EREDITATO da
+     dashboard_live.html: descrive l'evoluzione del modulo Treni
+     prima che venisse separato in questo file, utile come contesto
+     ma non sono versioni proprie di dashboard_treni.html.
+     ---
+     dashboard_live.html — v1.10 (2026-09-07)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
      Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
-     Novità v1.11 — quattro punti della lista sviluppi in un colpo:
-     (5) Bottone Aggiorna reso prominente: da outline sottile a pieno
-     ambra con ombra, + indicatore "aggiornato alle HH:MM" sotto,
-     perche' non esiste alcun refresh automatico dei dati in pagina
-     (solo l'orologio si auto-aggiorna) — serve rendere ovvio quando i
-     dati mostrati iniziano a essere vecchi.
-     (6) Fix bug bus Tiburtina: gli stopId 82007/82005 servono
-     contemporaneamente da "arrivo" (linee 490/495 ritorno) e
-     "partenza" (stesse linee andata) — unico caso del genere sulla
-     rete, dato che altrove andata/ritorno usano stopId fisici diversi
-     (es. Libia). Pinnando Tiburtina, i bus in arrivo comparivano
-     mischiati a quelli in partenza senza distinzione. Non ho
-     nascosto l'informazione arrivo (puo' comunque servire): ogni
-     card ora mostra un tag esplicito "▶ in partenza" / "◀ in arrivo"
-     quando c'e' una fermata pinnata.
-     (7) Filtro Andata/Ritorno automatico in base all'ora: prima
-     delle 12:00 default "andata", da mezzogiorno "ritorno". Un tap
-     manuale sull'altra direzione resta valido solo per la giornata
-     corrente (localStorage con data) — il giorno dopo la regola
-     automatica riparte pulita, cosi' un cambio eccezionale di oggi
-     non si trascina indefinitamente. Nessuna eccezione per il
-     weekend (non richiesta esplicitamente).
-     (3 pagine) Aggiunte dashboard_treni.html e dashboard_bus.html:
-     stesso codice di questo file con il modulo non pertinente
-     rimosso dall'HTML e le relative chiamate JS a livello globale
-     disattivate (le funzioni restano definite ma inutilizzate,
-     innocue). Link di navigazione discreti sotto l'orologio in tutte
-     e tre le pagine per passare dall'una all'altra in nuova scheda.
      Novità v1.10: treni preferiti. Stellina (★/☆) su ogni riga del
      tabellone principale per marcare/smarcare un treno; persistenza in
      localStorage (chiave monitorLive.treniPreferiti), stesso pattern
@@ -308,9 +293,9 @@
 
   <header>
     <div>
-      <div class="titolo"><span class="dot"></span>MONITOR LIVE</div>
+      <div class="titolo"><span class="dot"></span>MONITOR LIVE <span style="opacity:0.5; font-weight:400;">· solo treni</span></div>
       <div class="ora-sub" id="oraEl">--:--</div>
-      <div class="nav-pagine"><a href="dashboard_treni.html" target="_blank" rel="noopener">solo treni ↗</a><a href="dashboard_bus.html" target="_blank" rel="noopener">solo bus ↗</a></div>
+      <div class="nav-pagine"><a href="dashboard_live.html" target="_blank" rel="noopener">vista completa ↗</a><a href="dashboard_bus.html" target="_blank" rel="noopener">solo bus ↗</a></div>
     </div>
     <div>
       <button class="btn-refresh" onclick="aggiornaTutto()">↻ Aggiorna</button>
@@ -321,42 +306,6 @@
   <div class="section-label mod-treni" id="sectionPreferiti" style="display:none;">⭐ Treni preferiti</div>
   <div id="preferitiWrap"></div>
 
-  <div class="section-label mod-bus">🚌 Bus in tempo reale</div>
-
-  <div class="ricerca-vettura">
-    <input type="text" id="inputMatricola" placeholder="Cerca vettura per matricola (es. 3504)" inputmode="numeric">
-    <button onclick="avviaTracciamentoDaInput()">Traccia</button>
-  </div>
-
-  <div id="fermataPinAttivaWrap"></div>
-
-  <div id="fermataChipsWrap">
-    <div class="fermata-chips" id="fermataChips"></div>
-  </div>
-
-  <div id="busPannelloNormale">
-    <div class="bus-filtri" id="busFiltri">
-      <div class="riga-filtro">
-        <button id="btnBusAndata" onclick="selDirezione('andata')">Andata</button>
-        <button id="btnBusRitorno" onclick="selDirezione('ritorno')">Ritorno</button>
-      </div>
-      <div class="riga-filtro riga-sub">
-        <button id="btnBusDD" onclick="selGruppo('DD')">DD</button>
-        <button id="btnBusLL" onclick="selGruppo('LL')">LL</button>
-      </div>
-    </div>
-    <div id="busEl"><div class="loading">Caricamento...</div></div>
-  </div>
-
-  <div id="vetturaPannello" style="display:none;">
-    <div class="tracking-header">
-      <div class="titolo-tracking">Vettura <b id="trackingMatricolaLabel"></b></div>
-      <button onclick="chiudiTracciamento()">✕ Chiudi</button>
-    </div>
-    <div class="tracking-list-wrap">
-      <div id="trackingEl"><div class="loading">Caricamento...</div></div>
-    </div>
-  </div>
 
   <div class="section-label mod-treni section-label-row">
     <span>🚆 Treni — RFI + ViaggiaTreno</span>
@@ -382,18 +331,16 @@
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
     Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
-    <span style="opacity:0.6">dashboard_live.html v1.11</span>
+    <span style="opacity:0.6">dashboard_treni.html v1.0</span>
   </footer>
 
 </div>
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.11 (2026-09-11)
-// Novità v1.11: bottone Aggiorna prominente (5), fix bug Tiburtina con
-// tag partenza/arrivo (6), filtro Andata/Ritorno automatico per ora
-// del giorno (7), + dashboard_treni.html/dashboard_bus.html separate.
-// Vedi CHANGELOG.md.
+// dashboard_treni.html — v1.0 (2026-09-11)
+// Vista "solo treni", derivata da dashboard_live.html v1.11. Vedi
+// commento di versione nel <style> per il changelog completo.
 // ================================================================
 // CONFIGURAZIONE
 // ================================================================
@@ -904,7 +851,7 @@ async function caricaVettura() {
 }
 
 // ================================================================
-// TRENI PREFERITI (v1.10)
+// TRENI PREFERITI (ereditato v1.10 di dashboard_live.html)
 // ================================================================
 // Elenco di numeri treno preferiti, persistito in localStorage nello
 // stesso stile gia' usato per fermataPinnata/vetturaTracciata.
@@ -1235,11 +1182,9 @@ function selModalita(modalita) {
 // ================================================================
 function aggiornaTutto() {
   aggiornaOra();
-  if (vetturaTracciata) {
-    caricaVettura();
-  } else {
-    caricaBus();
-  }
+  // Pagina "solo treni" (dashboard_treni.html): nessun modulo bus qui,
+  // caricaBus()/caricaVettura() disattivate per non puntare a elementi
+  // DOM inesistenti (#busEl, #vetturaPannello...).
   caricaTreniRFI();
   caricaPreferitiPannello();
 
@@ -1252,27 +1197,16 @@ function aggiornaTutto() {
 }
 
 aggiornaOra();
-renderFiltriBus();
+// Pagina "solo treni": niente modulo bus, quindi niente filtri bus,
+// fermate pinnate, chip fermata o tracciamento vettura — tutte
+// funzioni che puntano a elementi DOM presenti solo in
+// dashboard_live.html/dashboard_bus.html.
 renderTabsStazioni();
 renderTogglePA();
 aggiornaLinkRfi();
 
-// Ripristino stato salvato (fermata pinnata + eventuale tracciamento
-// vettura in corso + treni preferiti) prima del primo caricamento,
-// cosi' la pagina riapre esattamente dove l'avevi lasciata.
-caricaFermataPinnataDaStorage();
-renderFermataChips();
-renderFermataPin();
-
 caricaPreferitiSalvati();
 caricaPreferitiPannello();
-
-const matricolaSalvata = caricaVetturaTracciataDaStorage();
-if (matricolaSalvata) {
-  avviaTracciamento(matricolaSalvata);
-} else {
-  caricaBus();
-}
 
 caricaTreniRFI();
 
