@@ -10,12 +10,24 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_treno.html — v1.7 (2026-09-10)
+     dettaglio_treno.html — v1.9 (2026-09-11)
      Pagina standalone: percorso completo di un treno (tutte le
      fermate, orari teorici/reali, ritardi, binari). Aperta in nuova
      scheda dal click sul numero treno nel Monitor RFI.
      Dati da: DENO_URL/treno/{numero} (proxy ViaggiaTreno andamentoTreno).
      Stessa identità cromatica (ambra) del modulo Treni di dashboard_live.html.
+     Novità v1.9: elenco treni preferiti FISSI (TRENI_PREFERITI_FISSI:
+     598, 4721, 4097, 4523, 20677, 20703, 20711 — verificati sul foglio
+     Excel "Treni Archivio", classificazione 1/priorita' massima per
+     tutti e 7). Sempre marcati ★, non rimovibili dalla stellina qui
+     (serve modificare l'array nel codice). STESSA costante duplicata
+     in dashboard_live.html — da tenere sincronizzata a mano tra i due
+     file, nessun modo automatico senza backend.
+     Novità v1.8: il link verso tabellone_stazione.html ora include
+     anche &codVT=... (codice ViaggiaTreno della stazione, quando il
+     match in stazioni_ridotte.json lo fornisce), cosi' il tabellone
+     della fermata puo' mostrare anche il ritardo ViaggiaTreno
+     affiancato a quello RFI, non solo RFI da solo.
      Novità v1.7: fermate cliccabili nella timeline. Ogni nome fermata
      con un match in stazioni_ridotte.json (nuovo file, da ospitare
      nella stessa cartella su GitHub Pages — sottoinsieme di 459
@@ -206,16 +218,15 @@
 
   <footer>
     Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI<br>
-    <span class="footer-rev">dettaglio_treno.html v1.7</span>
+    <span class="footer-rev">dettaglio_treno.html v1.9</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.7 (2026-09-10)
-// Novità v1.7: fermate cliccabili -> tabellone_stazione.html in nuova
-// scheda (richiede stazioni_ridotte.json nella stessa cartella). Vedi
-// commento di versione nel <style> per il changelog completo.
+// dettaglio_treno.html — v1.9 (2026-09-11)
+// Novità v1.9: TRENI_PREFERITI_FISSI (7 treni, sempre marcati ★).
+// Vedi commento di versione nel <style> per il changelog completo.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
@@ -258,7 +269,19 @@ async function caricaMappaStazioni() {
 // pannello "⭐ Treni preferiti" della dashboard principale, sullo
 // stesso dispositivo/browser. NON e' sincronizzato tra dispositivi
 // diversi: localStorage e' locale al singolo browser.
+//
+// TRENI_PREFERITI_FISSI (v1.9): stessa costante di dashboard_live.html
+// — DA TENERE SINCRONIZZATA A MANO tra i due file, non esiste un modo
+// automatico senza backend. Un treno fisso e' sempre marcato ★ e non
+// si puo' togliere da qui.
+const TRENI_PREFERITI_FISSI = ['598', '4721', '4097', '4523', '20677', '20703', '20711'];
+
+function eFisso(num) {
+  return TRENI_PREFERITI_FISSI.includes(String(num));
+}
+
 function ePreferito(num) {
+  if (eFisso(num)) return true;
   try {
     const grezzo = localStorage.getItem('monitorLive.treniPreferiti');
     const lista = grezzo ? JSON.parse(grezzo) : [];
@@ -268,6 +291,7 @@ function ePreferito(num) {
 
 function toggleFavoritoPagina() {
   if (!numeroTreno) return;
+  if (eFisso(numeroTreno)) return; // un treno fisso non si toglie da qui
   try {
     const grezzo = localStorage.getItem('monitorLive.treniPreferiti');
     let lista = grezzo ? JSON.parse(grezzo) : [];
@@ -332,7 +356,7 @@ function renderHeader(json) {
       <div class="treno-header-top">
         <span class="numero">${json.numeroTreno || numeroTreno}</span>
         <span class="categoria">${categoria}</span>
-        <button class="btn-stella ${ePreferito(numeroTreno) ? 'attiva' : ''}" id="btnStella" onclick="toggleFavoritoPagina()" title="Aggiungi/rimuovi dai preferiti">${ePreferito(numeroTreno) ? '★' : '☆'}</button>
+        <button class="btn-stella ${ePreferito(numeroTreno) ? 'attiva' : ''}" id="btnStella" onclick="toggleFavoritoPagina()" title="${eFisso(numeroTreno) ? 'Preferito fisso (non rimovibile da qui)' : 'Aggiungi/rimuovi dai preferiti'}">${ePreferito(numeroTreno) ? '★' : '☆'}</button>
       </div>
       <div class="tratta"><b>${origine}</b> → <b>${destinazione}</b></div>
       ${cancellato ? '<div class="badge-non-circolante">Treno cancellato</div>' : ''}
@@ -434,7 +458,7 @@ function renderPercorso(json) {
     // (senza placeId non sappiamo che tabellone RFI interrogare).
     const infoStazione = mappaStazioni.get(normalizzaNomeStazione(f.stazione));
     const nomeHtml = (infoStazione && infoStazione.placeIdRFI)
-      ? `<a class="tl-nome" href="tabellone_stazione.html?placeId=${infoStazione.placeIdRFI}&nome=${encodeURIComponent(f.stazione)}" target="_blank" rel="noopener">${f.stazione || '—'}</a>`
+      ? `<a class="tl-nome" href="tabellone_stazione.html?placeId=${infoStazione.placeIdRFI}&nome=${encodeURIComponent(f.stazione)}${infoStazione.codiceViaggiaTreno ? `&codVT=${infoStazione.codiceViaggiaTreno}` : ''}" target="_blank" rel="noopener">${f.stazione || '—'}</a>`
       : `<span class="tl-nome">${f.stazione || '—'}</span>`;
 
     const blocchi = [

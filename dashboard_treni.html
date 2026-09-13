@@ -13,23 +13,55 @@
      dashboard_treni.html — v1.0 (2026-09-11)
      Vista "solo treni" di Monitor Live: stesso codice e stesso
      modulo Treni di dashboard_live.html, con il modulo Bus rimosso
-     dall'HTML e le relative chiamate JS a livello globale disattivate
-     (le funzioni bus restano definite ma inutilizzate — piu' sicuro
-     che rimuoverle chirurgicamente da un file cosi' denso). Derivato
-     da dashboard_live.html v1.11 (2026-09-11). Nav discreto sotto
-     l'orologio per passare a "vista completa" o "solo bus".
-     Lo storico versioni qui sotto (v1.x) e' EREDITATO da
-     dashboard_live.html: descrive l'evoluzione del modulo Treni
-     prima che venisse separato in questo file, utile come contesto
-     ma non sono versioni proprie di dashboard_treni.html.
+     dall'HTML e le relative chiamate JS a livello globale disattivate.
+     Derivato da dashboard_live.html v1.12 (2026-09-11). Nav discreto
+     sotto l'orologio per passare a "vista completa" o "solo bus".
+     Lo storico versioni qui sotto e' EREDITATO da dashboard_live.html:
+     descrive l'evoluzione del modulo Treni prima della separazione.
      ---
-     dashboard_live.html — v1.10 (2026-09-07)
+     dashboard_live.html — v1.12 (2026-09-11)
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
        --teal  = modulo Bus (ATAC)
      Questo distingue visivamente Live da Statistiche (che usa
      un terzo accento, viola) E i due moduli interni tra loro.
+     Novità v1.12: elenco treni preferiti FISSI (TRENI_PREFERITI_FISSI:
+     598, 4721, 4097, 4523, 20677, 20703, 20711 — verificati sul foglio
+     Excel "Treni Archivio", classificazione 1/priorita' massima per
+     tutti e 7). Sempre presenti nel pannello "⭐ Treni preferiti",
+     sempre marcati ★ sul tabellone, non rimovibili dalla stellina
+     (tasto ✕ sostituito da 📌 sulla card). STESSA costante duplicata
+     in dettaglio_treno.html — da tenere sincronizzata a mano tra i due
+     file, nessun modo automatico senza backend.
+     Novità v1.11 — quattro punti della lista sviluppi in un colpo:
+     (5) Bottone Aggiorna reso prominente: da outline sottile a pieno
+     ambra con ombra, + indicatore "aggiornato alle HH:MM" sotto,
+     perche' non esiste alcun refresh automatico dei dati in pagina
+     (solo l'orologio si auto-aggiorna) — serve rendere ovvio quando i
+     dati mostrati iniziano a essere vecchi.
+     (6) Fix bug bus Tiburtina: gli stopId 82007/82005 servono
+     contemporaneamente da "arrivo" (linee 490/495 ritorno) e
+     "partenza" (stesse linee andata) — unico caso del genere sulla
+     rete, dato che altrove andata/ritorno usano stopId fisici diversi
+     (es. Libia). Pinnando Tiburtina, i bus in arrivo comparivano
+     mischiati a quelli in partenza senza distinzione. Non ho
+     nascosto l'informazione arrivo (puo' comunque servire): ogni
+     card ora mostra un tag esplicito "▶ in partenza" / "◀ in arrivo"
+     quando c'e' una fermata pinnata.
+     (7) Filtro Andata/Ritorno automatico in base all'ora: prima
+     delle 12:00 default "andata", da mezzogiorno "ritorno". Un tap
+     manuale sull'altra direzione resta valido solo per la giornata
+     corrente (localStorage con data) — il giorno dopo la regola
+     automatica riparte pulita, cosi' un cambio eccezionale di oggi
+     non si trascina indefinitamente. Nessuna eccezione per il
+     weekend (non richiesta esplicitamente).
+     (3 pagine) Aggiunte dashboard_treni.html e dashboard_bus.html:
+     stesso codice di questo file con il modulo non pertinente
+     rimosso dall'HTML e le relative chiamate JS a livello globale
+     disattivate (le funzioni restano definite ma inutilizzate,
+     innocue). Link di navigazione discreti sotto l'orologio in tutte
+     e tre le pagine per passare dall'una all'altra in nuova scheda.
      Novità v1.10: treni preferiti. Stellina (★/☆) su ogni riga del
      tabellone principale per marcare/smarcare un treno; persistenza in
      localStorage (chiave monitorLive.treniPreferiti), stesso pattern
@@ -269,6 +301,7 @@
   .preferito-stato.cancellato { color: var(--red); font-weight: 700; }
   .btn-rimuovi-preferito { background: none; border: none; color: var(--text-muted); font-size: 1rem; line-height: 1; padding: 0 0 0 10px; cursor: pointer; }
   .btn-rimuovi-preferito:active { color: var(--red); }
+  .tag-fisso { font-size: 0.85rem; padding-left: 10px; opacity: 0.6; }
 
   .btn-stella { background: none; border: none; padding: 0 2px; font-size: 0.9rem; line-height: 1; cursor: pointer; color: var(--text-muted); vertical-align: middle; }
   .btn-stella.attiva { color: var(--amber); }
@@ -339,7 +372,7 @@
 <script>
 // ================================================================
 // dashboard_treni.html — v1.0 (2026-09-11)
-// Vista "solo treni", derivata da dashboard_live.html v1.11. Vedi
+// Vista "solo treni", derivata da dashboard_live.html v1.12. Vedi
 // commento di versione nel <style> per il changelog completo.
 // ================================================================
 // CONFIGURAZIONE
@@ -851,7 +884,7 @@ async function caricaVettura() {
 }
 
 // ================================================================
-// TRENI PREFERITI (ereditato v1.10 di dashboard_live.html)
+// TRENI PREFERITI (v1.10, elenco fisso aggiunto in v1.12)
 // ================================================================
 // Elenco di numeri treno preferiti, persistito in localStorage nello
 // stesso stile gia' usato per fermataPinnata/vetturaTracciata.
@@ -860,6 +893,19 @@ async function caricaVettura() {
 // dettaglio_treno.html), cosi' funziona anche "durante il viaggio"
 // quando la stazione selezionata nel tabellone non e' piu' quella
 // pertinente (es. sei gia' partito da un pezzo).
+//
+// TRENI_PREFERITI_FISSI (v1.12): elenco fisso nel codice, identico
+// su ogni dispositivo (non dipende da localStorage). Per aggiungere o
+// togliere un treno fisso, basta modificare questo array — nessun'altra
+// modifica necessaria. Verificati sul foglio Excel "Treni Archivio":
+// classificazione 1 (priorita' massima) per tutti e 7.
+// Un treno fisso NON si puo' togliere dalla stellina (compare sempre
+// marcato ★): per rimuoverlo serve modificare questo array, esattamente
+// come per aggiungerlo. Vanno tenuti sincronizzati A MANO con lo stesso
+// array in dettaglio_treno.html — non esiste (ancora) un modo per
+// condividerlo automaticamente tra i due file senza un backend.
+const TRENI_PREFERITI_FISSI = ['598', '4721', '4097', '4523', '20677', '20703', '20711'];
+
 let treniPreferiti = [];
 
 function caricaPreferitiSalvati() {
@@ -874,11 +920,17 @@ function salvaPreferiti() {
 }
 
 function ePreferito(numeroTreno) {
-  return treniPreferiti.includes(String(numeroTreno));
+  const num = String(numeroTreno);
+  return TRENI_PREFERITI_FISSI.includes(num) || treniPreferiti.includes(num);
+}
+
+function eFisso(numeroTreno) {
+  return TRENI_PREFERITI_FISSI.includes(String(numeroTreno));
 }
 
 function toggleFavorito(numeroTreno) {
   const num = String(numeroTreno);
+  if (eFisso(num)) return; // un treno fisso non si toglie dalla stellina
   if (ePreferito(num)) {
     treniPreferiti = treniPreferiti.filter(n => n !== num);
   } else {
@@ -922,7 +974,11 @@ async function caricaPreferitiPannello() {
   const sezione = document.getElementById('sectionPreferiti');
   const wrap = document.getElementById('preferitiWrap');
 
-  if (treniPreferiti.length === 0) {
+  // Unione fissi + dinamici, deduplicata: se un treno e' sia fisso che
+  // aggiunto a mano (caso raro ma possibile), non va mostrato 2 volte.
+  const elenco = [...new Set([...TRENI_PREFERITI_FISSI, ...treniPreferiti])];
+
+  if (elenco.length === 0) {
     sezione.style.display = 'none';
     wrap.innerHTML = '';
     return;
@@ -933,11 +989,13 @@ async function caricaPreferitiPannello() {
   // Fetch indipendenti per ogni treno preferito: se uno fallisce (es.
   // numero non trovato oggi) non deve rompere gli altri.
   const risultati = await Promise.allSettled(
-    treniPreferiti.map(num => fetch(`${DENO_URL}/treno/${num}`).then(r => r.json()))
+    elenco.map(num => fetch(`${DENO_URL}/treno/${num}`).then(r => r.json()))
   );
 
   wrap.innerHTML = risultati.map((ris, i) => {
-    const num = treniPreferiti[i];
+    const num = elenco[i];
+    const tastoRimuovi = eFisso(num) ? '' : `<button class="btn-rimuovi-preferito" onclick="event.preventDefault(); event.stopPropagation(); toggleFavorito('${num}')" title="Rimuovi">✕</button>`;
+
     if (ris.status === 'rejected' || ris.value.errore) {
       return `
         <div class="preferito-card">
@@ -945,7 +1003,7 @@ async function caricaPreferitiPannello() {
             <div class="preferito-num">${num}</div>
             <div class="preferito-tratta">Dato non disponibile</div>
           </div>
-          <button class="btn-rimuovi-preferito" onclick="toggleFavorito('${num}')" title="Rimuovi">✕</button>
+          ${tastoRimuovi}
         </div>`;
     }
     const json = ris.value;
@@ -957,7 +1015,7 @@ async function caricaPreferitiPannello() {
           <div class="preferito-tratta">${json.origine || '—'} → ${json.destinazione || '—'}</div>
         </div>
         <div class="preferito-stato ${stato.classe}">${stato.testo}</div>
-        <button class="btn-rimuovi-preferito" onclick="event.preventDefault(); event.stopPropagation(); toggleFavorito('${num}')" title="Rimuovi">✕</button>
+        ${tastoRimuovi || '<span class="tag-fisso" title="Preferito fisso">📌</span>'}
       </a>`;
   }).join('');
 }
@@ -1182,9 +1240,9 @@ function selModalita(modalita) {
 // ================================================================
 function aggiornaTutto() {
   aggiornaOra();
-  // Pagina "solo treni" (dashboard_treni.html): nessun modulo bus qui,
-  // caricaBus()/caricaVettura() disattivate per non puntare a elementi
-  // DOM inesistenti (#busEl, #vetturaPannello...).
+  // Pagina "solo treni": nessun modulo bus qui, caricaBus()/
+  // caricaVettura() disattivate per non puntare a elementi DOM
+  // inesistenti (#busEl, #vetturaPannello...).
   caricaTreniRFI();
   caricaPreferitiPannello();
 
@@ -1198,9 +1256,7 @@ function aggiornaTutto() {
 
 aggiornaOra();
 // Pagina "solo treni": niente modulo bus, quindi niente filtri bus,
-// fermate pinnate, chip fermata o tracciamento vettura — tutte
-// funzioni che puntano a elementi DOM presenti solo in
-// dashboard_live.html/dashboard_bus.html.
+// fermate pinnate, chip fermata o tracciamento vettura.
 renderTabsStazioni();
 renderTogglePA();
 aggiornaLinkRfi();
