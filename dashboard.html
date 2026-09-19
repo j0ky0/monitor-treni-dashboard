@@ -12,7 +12,22 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   /* ================================================================
-     dashboard.html — v2.1 (2026-08-11)
+     dashboard.html — v2.3 (2026-09-19)
+     Novità v2.3: due nuovi filtri, "Categoria treno" (REG/IC/AV/ITA/EN
+     — dalla stessa colonna Excel, nota: R ed RV non distinti a monte,
+     compaiono uniti come "REG") e "Priorità" (la tua classificazione
+     1-5). Applicati LATO CLIENT sul risultato già arrivato dalla RPC
+     dashboard_stats (che non conosce questi due dati, vivono solo
+     nell'Excel) — nessuna modifica a Supabase necessaria. Un treno non
+     ancora classificato nell'Excel viene escluso se il filtro
+     corrispondente è attivo (non può soddisfare un criterio ignoto).
+     Novità v2.2: menu "Numero treno" raggruppato per priorità
+     (CLASSIFICAZIONE_TRENI, scala 1-5 dal foglio "Treni Archivio" di
+     treni_archivio_0_1.xlsx — 1 = treno chiave, 5 = secondario). I
+     tuoi treni chiave compaiono per primi nel menu, sotto l'etichetta
+     "★ Treni chiave", invece di un elenco piatto senza indicazione di
+     rilevanza. Treni non ancora classificati nell'Excel finiscono nel
+     gruppo "Non classificato" in fondo, senza sparire.
      Identità: MONITOR TRENI (Statistiche) — accento VIOLA, per
      distinguersi a colpo d'occhio dalla Dashboard Live (ambra/teal).
      Stesso sfondo neutro condiviso tra i due strumenti del progetto.
@@ -91,6 +106,28 @@
         <label for="filtroStazione">Stazione</label>
         <select id="filtroStazione"><option value="">Tutte le stazioni</option></select>
       </div>
+      <div class="campo">
+        <label for="filtroCategoria">Categoria treno</label>
+        <select id="filtroCategoria">
+          <option value="">Tutte</option>
+          <option value="REG">REG (Regionale/RV)</option>
+          <option value="IC">IC</option>
+          <option value="AV">AV</option>
+          <option value="ITA">ITA (Italo)</option>
+          <option value="EN">EN (Euronight)</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label for="filtroClassificazione">Priorità (tua classificazione)</label>
+        <select id="filtroClassificazione">
+          <option value="">Tutte</option>
+          <option value="1">★ Classe 1 — chiave</option>
+          <option value="2">Classe 2</option>
+          <option value="3">Classe 3</option>
+          <option value="4">Classe 4</option>
+          <option value="5">Classe 5 — secondari</option>
+        </select>
+      </div>
       <div class="campo full">
         <label>Fascia oraria partenza (opzionale)</label>
         <div class="orario-range">
@@ -126,14 +163,14 @@
     <div class="chart-container"><canvas id="graficoRitardi"></canvas></div>
   </div>
 
-  <footer>dati raccolti da ViaggiaTreno · aggiornati automaticamente ogni sera<br><span style="opacity:0.6">dashboard.html v2.1</span></footer>
+  <footer>dati raccolti da ViaggiaTreno · aggiornati automaticamente ogni sera<br><span style="opacity:0.6">dashboard.html v2.3</span></footer>
 </div>
 
 <script>
 // ================================================================
-// dashboard.html — v2.1 (2026-08-11)
-// Novità v2.1: identità viola per distinguere questa dashboard
-// (Statistiche) da dashboard_live.html (ambra/teal). Vedi CHANGELOG.md.
+// dashboard.html — v2.3 (2026-09-19)
+// Novità v2.3: filtri Categoria treno + Priorità, applicati lato client.
+// Vedi commento di versione nel <style> per il changelog completo.
 // ================================================================
 // CONFIGURAZIONE — queste due righe sono le UNICHE da controllare
 // ================================================================
@@ -143,14 +180,69 @@ const SUPABASE_ANON_KEY = "sb_publishable_ppQxHMlhZmEsKpeHgHUHww_i4cxVSjp"; // <
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let chartInstance = null;
 
+// ----------------------------------------------------------------
+// CLASSIFICAZIONE_TRENI (v2.2): priorità 1 (chiave, sempre in primo
+// piano) a 5 (secondaria, solo per analisi cause a cascata) — stessa
+// scala già usata per i bus (Utilità). Fonte: foglio "Treni Archivio"
+// di treni_archivio_0_1.xlsx, colonna "Classificazione (1-5)".
+// Per aggiornare: modifica questo oggetto, nessun'altra modifica
+// necessaria. I treni non presenti qui (non ancora classificati
+// nell'Excel) finiscono nel gruppo "Non classificato" in fondo al menu.
+// ----------------------------------------------------------------
+const CLASSIFICAZIONE_TRENI = {"294":3,"531":3,"540":5,"598":1,"4095":3,"4097":1,"4105":4,"4106":2,"4107":1,"4110":5,"4150":5,"4151":3,"4155":3,"4156":2,"4158":1,"4196":4,"4256":1,"4520":4,"4521":2,"4523":1,"4530":2,"4534":2,"4539":4,"4719":1,"4721":1,"4731":4,"4732":2,"4733":4,"4734":3,"4736":2,"8528":2,"8968":4,"9326":2,"9328":2,"9432":2,"9434":2,"9508":4,"9556":2,"9560":2,"9660":2,"9662":2,"9944":4,"9954":4,"9992":4,"9994":4,"20395":4,"20397":4,"20405":4,"20411":3,"20423":2,"20439":2,"20485":4,"20491":4,"20493":4,"20497":3,"20503":3,"20509":3,"20517":4,"20523":4,"20529":4,"20539":4,"20547":1,"20665":4,"20675":2,"20677":1,"20683":3,"20687":3,"20693":3,"20703":1,"20711":1,"20717":2,"20721":2,"20731":4,"21379":4,"9563":4};
+
+// CATEGORIA_TRENI (v2.3): stessa fonte/foglio, colonna "Categoria
+// (R/IC/AV...)". Nota: nell'Excel R ed RV non sono distinti, sono
+// entrambi "REG" — se in futuro servisse separarli, va aggiunta quella
+// distinzione nell'Excel a monte, qui posso solo riflettere quello che
+// c'è nella colonna sorgente.
+const CATEGORIA_TRENI = {"294":"EN","531":"IC","540":"IC","598":"IC","4095":"REG","4097":"REG","4105":"REG","4106":"REG","4107":"REG","4110":"REG","4150":"REG","4151":"REG","4155":"REG","4156":"REG","4158":"REG","4196":"REG","4256":"REG","4520":"REG","4521":"REG","4523":"REG","4530":"REG","4534":"REG","4539":"REG","4719":"REG","4721":"REG","4731":"REG","4732":"REG","4733":"REG","4734":"REG","4736":"REG","8528":"AV","8968":"ITA","9326":"AV","9328":"AV","9432":"AV","9434":"AV","9508":"AV","9556":"AV","9560":"AV","9660":"AV","9662":"AV","9944":"ITA","9954":"ITA","9992":"ITA","9994":"ITA","20395":"REG","20397":"REG","20405":"REG","20411":"REG","20423":"REG","20439":"REG","20485":"REG","20491":"REG","20493":"REG","20497":"REG","20503":"REG","20509":"REG","20517":"REG","20523":"REG","20529":"REG","20539":"REG","20547":"REG","20665":"REG","20675":"REG","20677":"REG","20683":"REG","20687":"REG","20693":"REG","20703":"REG","20711":"REG","20717":"REG","20721":"REG","20731":"REG","21379":"REG","9563":"AV"};
+
+const ETICHETTA_CLASSE = {
+  1: '★ Treni chiave',
+  2: 'Classe 2',
+  3: 'Classe 3',
+  4: 'Classe 4',
+  5: 'Classe 5 — secondari',
+};
+
 async function popolaFiltri() {
   const { data: treni } = await sb.from('lista_treni').select('numero_treno');
   const selTreno = document.getElementById('filtroTreno');
+
+  // Raggruppa per classe (1 -> 5, poi "Non classificato" in fondo),
+  // ordinando per numero treno crescente dentro ogni gruppo — così il
+  // menu porta subito i treni chiave in cima invece di un elenco
+  // piatto senza indicazione di rilevanza.
+  const gruppi = { 1: [], 2: [], 3: [], 4: [], 5: [], nc: [] };
   (treni || []).forEach(r => {
-    const opt = document.createElement('option');
-    opt.value = r.numero_treno; opt.textContent = r.numero_treno;
-    selTreno.appendChild(opt);
+    const classe = CLASSIFICAZIONE_TRENI[String(r.numero_treno)];
+    (gruppi[classe] || gruppi.nc).push(r.numero_treno);
   });
+  Object.values(gruppi).forEach(lista => lista.sort((a, b) => a - b));
+
+  [1, 2, 3, 4, 5].forEach(classe => {
+    if (gruppi[classe].length === 0) return;
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = ETICHETTA_CLASSE[classe];
+    gruppi[classe].forEach(num => {
+      const opt = document.createElement('option');
+      opt.value = num; opt.textContent = num;
+      optgroup.appendChild(opt);
+    });
+    selTreno.appendChild(optgroup);
+  });
+  if (gruppi.nc.length > 0) {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = 'Non classificato';
+    gruppi.nc.forEach(num => {
+      const opt = document.createElement('option');
+      opt.value = num; opt.textContent = num;
+      optgroup.appendChild(opt);
+    });
+    selTreno.appendChild(optgroup);
+  }
+
   const { data: stazioni } = await sb.from('lista_stazioni').select('nome_stazione_fermata');
   const selStaz = document.getElementById('filtroStazione');
   (stazioni || []).forEach(r => {
@@ -185,6 +277,8 @@ function leggiFiltri() {
 function resetFiltri() {
   document.getElementById('filtroTreno').value = '';
   document.getElementById('filtroStazione').value = '';
+  document.getElementById('filtroCategoria').value = '';
+  document.getElementById('filtroClassificazione').value = '';
   document.getElementById('oraInizio').value = '';
   document.getElementById('oraFine').value = '';
   caricaDati();
@@ -196,12 +290,29 @@ async function caricaDati() {
   tbody.innerHTML = '<tr><td colspan="6" class="loading">Caricamento dati...</td></tr>';
   riepilogo.textContent = '';
 
-  const { data, error } = await sb.rpc('dashboard_stats', leggiFiltri());
+  const { data: datiGrezzi, error } = await sb.rpc('dashboard_stats', leggiFiltri());
 
   if (error) {
     tbody.innerHTML = `<tr><td colspan="6" class="errore">Errore: ${error.message}</td></tr>`;
     return;
   }
+
+  // Filtri categoria/classificazione: applicati QUI, lato client, non
+  // passati come parametro alla RPC — Supabase non conosce questi due
+  // dati (vivono solo nell'Excel), quindi filtriamo il risultato gia'
+  // arrivato incrociandolo con CATEGORIA_TRENI/CLASSIFICAZIONE_TRENI
+  // per numero treno. Un treno non presente in una delle due mappe
+  // (non ancora classificato nell'Excel) viene escluso se quel filtro
+  // e' attivo — non puo' soddisfare un criterio che non conosciamo.
+  const categoriaSel = document.getElementById('filtroCategoria').value;
+  const classeSel = document.getElementById('filtroClassificazione').value;
+  const data = (datiGrezzi || []).filter(r => {
+    const num = String(r.numero_treno);
+    if (categoriaSel && CATEGORIA_TRENI[num] !== categoriaSel) return false;
+    if (classeSel && String(CLASSIFICAZIONE_TRENI[num]) !== classeSel) return false;
+    return true;
+  });
+
   if (!data || data.length === 0) {
     tbody.innerHTML = '<tr><td colspan="6" class="vuoto">Nessun risultato con questi filtri</td></tr>';
     if (chartInstance) chartInstance.destroy();
