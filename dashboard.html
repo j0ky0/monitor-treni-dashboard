@@ -12,7 +12,24 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   /* ================================================================
-     dashboard.html — v2.3 (2026-09-19)
+     dashboard.html — v2.4 (2026-09-19)
+     Novità v2.4 — RICHIEDE prima l'esecuzione della v2 di
+     dashboard_setup.sql su Supabase (aggiunge orario_partenza_previsto/
+     orario_arrivo_previsto/num_partenze/num_arrivi alla RPC), altrimenti
+     queste colonne/il riepilogo restano vuoti:
+     (1) Colonne "Orario part." e "Orario arr." in tabella — orario
+     PROGRAMMATO (non il ritardo, quello già c'era), valore più
+     frequente per quel treno+stazione (MODE, gestisce i casi in cui
+     un treno abbia orari leggermente diversi in giorni diversi).
+     (2) Numero treno cliccabile in tabella: filtra la vista solo su
+     quel treno (resta sulla stessa pagina, non apre nulla di nuovo).
+     (3) Card "riepilogo per treno" (visibile solo quando il risultato
+     filtrato riguarda UN SOLO numero treno): mostra la stazione da cui
+     parte più spesso e quella in cui arriva più spesso, con orario e
+     conteggio rilevazioni — utile perché alcuni numeri treno vengono
+     riusati su percorsi diversi in giorni diversi (cambio numero), una
+     singola riga presa a caso non è sempre rappresentativa del
+     "percorso normale" di quel numero.
      Novità v2.3: due nuovi filtri, "Categoria treno" (REG/IC/AV/ITA/EN
      — dalla stessa colonna Excel, nota: R ed RV non distinti a monte,
      compaiono uniti come "REG") e "Priorità" (la tua classificazione
@@ -79,7 +96,16 @@
   .flap.rit-zero { color: var(--text-muted); }
   .flap.rit-pos { color: var(--red); }
   .num-treno { font-family: var(--font-mono); color: var(--viola); font-weight: 700; }
+  .num-treno.cliccabile { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+  .num-treno.cliccabile:active { color: var(--text); }
+  .orario-cell { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); }
   .stazione-cell { color: var(--text); font-size: 0.8rem; }
+
+  .riepilogo-treno-card { display: flex; gap: 1rem; flex-wrap: wrap; background: var(--bg-panel); border: 1px solid var(--viola-dim); border-radius: 10px; padding: 0.8rem 1rem; margin-bottom: 1rem; }
+  .riepilogo-treno-voce { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 180px; }
+  .riepilogo-treno-voce .etichetta { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+  .riepilogo-treno-voce .valore { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .riepilogo-treno-voce .dettaglio { font-family: var(--font-mono); font-size: 0.72rem; color: var(--viola); }
   .vuoto, .loading, .errore { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.85rem; }
   .errore { color: var(--red); }
   .chart-section { background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 10px; padding: 1rem; }
@@ -144,16 +170,17 @@
   </div>
 
   <div class="riepilogo" id="riepilogo"></div>
+  <div id="riepilogoTreno"></div>
 
   <div class="board-wrap">
     <table>
       <thead>
         <tr>
-          <th>Treno</th><th>Stazione</th><th>Rilev.</th><th>Rit. partenza</th><th>Rit. arrivo</th><th>Min / Max</th>
+          <th>Treno</th><th>Stazione</th><th>Rilev.</th><th>Orario part.</th><th>Orario arr.</th><th>Rit. partenza</th><th>Rit. arrivo</th><th>Min / Max</th>
         </tr>
       </thead>
       <tbody id="tabellaBody">
-        <tr><td colspan="6" class="loading">Caricamento dati...</td></tr>
+        <tr><td colspan="8" class="loading">Caricamento dati...</td></tr>
       </tbody>
     </table>
   </div>
@@ -163,14 +190,16 @@
     <div class="chart-container"><canvas id="graficoRitardi"></canvas></div>
   </div>
 
-  <footer>dati raccolti da ViaggiaTreno · aggiornati automaticamente ogni sera<br><span style="opacity:0.6">dashboard.html v2.3</span></footer>
+  <footer>dati raccolti da ViaggiaTreno · aggiornati automaticamente ogni sera<br><span style="opacity:0.6">dashboard.html v2.4</span></footer>
 </div>
 
 <script>
 // ================================================================
-// dashboard.html — v2.3 (2026-09-19)
-// Novità v2.3: filtri Categoria treno + Priorità, applicati lato client.
-// Vedi commento di versione nel <style> per il changelog completo.
+// dashboard.html — v2.4 (2026-09-19)
+// Novità v2.4: colonne orario programmato, numero treno cliccabile
+// (filtra la vista), riepilogo partenza/arrivo più frequente per
+// treno. RICHIEDE la v2 di dashboard_setup.sql eseguita su Supabase
+// prima di funzionare. Vedi commento di versione nel <style>.
 // ================================================================
 // CONFIGURAZIONE — queste due righe sono le UNICHE da controllare
 // ================================================================
@@ -287,13 +316,13 @@ function resetFiltri() {
 async function caricaDati() {
   const tbody = document.getElementById('tabellaBody');
   const riepilogo = document.getElementById('riepilogo');
-  tbody.innerHTML = '<tr><td colspan="6" class="loading">Caricamento dati...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" class="loading">Caricamento dati...</td></tr>';
   riepilogo.textContent = '';
 
   const { data: datiGrezzi, error } = await sb.rpc('dashboard_stats', leggiFiltri());
 
   if (error) {
-    tbody.innerHTML = `<tr><td colspan="6" class="errore">Errore: ${error.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="errore">Errore: ${error.message}</td></tr>`;
     return;
   }
 
@@ -314,21 +343,72 @@ async function caricaDati() {
   });
 
   if (!data || data.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="vuoto">Nessun risultato con questi filtri</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="vuoto">Nessun risultato con questi filtri</td></tr>';
     if (chartInstance) chartInstance.destroy();
     return;
   }
   riepilogo.textContent = `${data.length} combinazioni treno/stazione trovate`;
   tbody.innerHTML = data.map(r => `
     <tr>
-      <td class="num-treno">${r.numero_treno}</td>
+      <td class="num-treno cliccabile" onclick="filtraSuTreno('${r.numero_treno}')" title="Filtra solo su questo treno">${r.numero_treno}</td>
       <td class="stazione-cell">${r.nome_stazione_fermata}</td>
       <td>${r.num_rilevazioni}</td>
+      <td class="orario-cell">${r.orario_partenza_previsto || '—'}</td>
+      <td class="orario-cell">${r.orario_arrivo_previsto || '—'}</td>
       <td>${formattaRitardo(r.ritardo_medio_partenza)}</td>
       <td>${formattaRitardo(r.ritardo_medio_arrivo)}</td>
       <td style="color:var(--text-muted); font-family:var(--font-mono); font-size:0.78rem;">${r.ritardo_minimo ?? '—'} / ${r.ritardo_massimo ?? '—'}</td>
     </tr>`).join('');
   disegnaGrafico(data);
+  disegnaRiepilogoTreno(data);
+}
+
+// Click sul numero treno in tabella: filtra la vista solo su quel
+// treno, senza aprire nulla di separato — resti sulla stessa pagina.
+function filtraSuTreno(numero) {
+  document.getElementById('filtroTreno').value = String(numero);
+  caricaDati();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Riepilogo "stazione di partenza/arrivo più frequente" (v2.4):
+// mostrato solo quando il risultato filtrato riguarda UN SOLO numero
+// treno (perché altrimenti mischierebbe stazioni di treni diversi).
+// Utile perché alcuni numeri treno vengono riusati su percorsi diversi
+// in giorni differenti ("cambio numero") — la stazione con più
+// occorrenze come partenza/arrivo è un indicatore più affidabile del
+// "percorso normale" di quel numero rispetto a una riga presa a caso.
+function disegnaRiepilogoTreno(data) {
+  const el = document.getElementById('riepilogoTreno');
+  const numeriDistinti = new Set(data.map(r => r.numero_treno));
+
+  if (numeriDistinti.size !== 1) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const partenzaTop = data.filter(r => r.num_partenze > 0)
+    .sort((a, b) => b.num_partenze - a.num_partenze)[0];
+  const arrivoTop = data.filter(r => r.num_arrivi > 0)
+    .sort((a, b) => b.num_arrivi - a.num_arrivi)[0];
+
+  if (!partenzaTop && !arrivoTop) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `
+    <div class="riepilogo-treno-card">
+      ${partenzaTop ? `
+        <div class="riepilogo-treno-voce">
+          <span class="etichetta">Parte più spesso da</span>
+          <span class="valore">${partenzaTop.nome_stazione_fermata}</span>
+          <span class="dettaglio">${partenzaTop.orario_partenza_previsto || '—'} · ${partenzaTop.num_partenze} rilevazioni</span>
+        </div>` : ''}
+      ${arrivoTop ? `
+        <div class="riepilogo-treno-voce">
+          <span class="etichetta">Arriva più spesso a</span>
+          <span class="valore">${arrivoTop.nome_stazione_fermata}</span>
+          <span class="dettaglio">${arrivoTop.orario_arrivo_previsto || '—'} · ${arrivoTop.num_arrivi} rilevazioni</span>
+        </div>` : ''}
+    </div>`;
 }
 
 function disegnaGrafico(data) {
