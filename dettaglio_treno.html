@@ -10,12 +10,24 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_treno.html — v1.9 (2026-09-11)
+     dettaglio_treno.html — v1.10 (2026-09-23)
      Pagina standalone: percorso completo di un treno (tutte le
      fermate, orari teorici/reali, ritardi, binari). Aperta in nuova
      scheda dal click sul numero treno nel Monitor RFI.
      Dati da: DENO_URL/treno/{numero} (proxy ViaggiaTreno andamentoTreno).
      Stessa identità cromatica (ambra) del modulo Treni di dashboard_live.html.
+     Novità v1.10: FIX bug barra di progressione sparita per alcuni
+     treni (es. 20703). La fermata "corrente" non si individua più
+     confrontando il nome dell'ultimo rilevamento GPS con l'elenco
+     fermate — quel nome può essere un punto infrastrutturale (bivio,
+     posto movimento, piazzale di smistamento) che non compare mai tra
+     le fermate ufficiali, facendo fallire il confronto e sparire tutta
+     la progressione (pallini, barra, nome in grassetto) anche quando
+     il treno aveva già chiaramente superato diverse fermate. Ora si usa
+     l'orario REALE già registrato su ogni fermata (partenzaReale, o
+     arrivoReale per fermate raggiunte ma non ancora lasciate/per la
+     destinazione finale) — dato certo che già avevamo, non più
+     dipendente da un nome che può non esistere nell'elenco.
      Novità v1.9: elenco treni preferiti FISSI (TRENI_PREFERITI_FISSI:
      598, 4721, 4097, 4523, 20677, 20703, 20711 — verificati sul foglio
      Excel "Treni Archivio", classificazione 1/priorita' massima per
@@ -218,15 +230,16 @@
 
   <footer>
     Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI<br>
-    <span class="footer-rev">dettaglio_treno.html v1.9</span>
+    <span class="footer-rev">dettaglio_treno.html v1.10</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.9 (2026-09-11)
-// Novità v1.9: TRENI_PREFERITI_FISSI (7 treni, sempre marcati ★).
-// Vedi commento di versione nel <style> per il changelog completo.
+// dettaglio_treno.html — v1.10 (2026-09-23)
+// Novità v1.10: FIX barra progressione basata su orari reali per-fermata
+// invece del nome GPS (poteva essere un punto infrastrutturale). Vedi
+// commento di versione nel <style> per il changelog completo.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 
@@ -419,15 +432,32 @@ function renderPercorso(json) {
     return;
   }
 
-  // Fermata "corrente" = quella dell'ultimo rilevamento GPS (stesso
-  // dato usato dalla card renderPosizioneAttuale). Se non troviamo un
-  // match esatto sul nome (o il treno non e' ancora partito), nessuna
-  // riga viene evidenziata come "corrente" — non e' un errore, solo un
-  // dato che ViaggiaTreno non fornisce sempre.
-  const nomeRilevamento = (json.stazioneUltimoRilevamento || '').trim().toUpperCase();
-  const indiceCorrente = nomeRilevamento
-    ? fermate.findIndex(f => (f.stazione || '').trim().toUpperCase() === nomeRilevamento)
-    : -1;
+  // Fermata "corrente" = l'ultima con un orario REALE registrato
+  // (partenzaReale, o arrivoReale per la destinazione finale) — non
+  // il nome dell'ultimo rilevamento GPS come nelle versioni precedenti.
+  // FIX v1.10: il nome GPS (json.stazioneUltimoRilevamento) può essere
+  // un punto infrastrutturale — bivio, posto movimento, piazzale di
+  // smistamento — che non compare mai tra le fermate ufficiali del
+  // treno (es. "POSTO MOVIMENTO NORD / RM SMISTAMENTO", osservato sul
+  // treno 20703). Il vecchio confronto per nome falliva in quel caso,
+  // indiceCorrente restava -1, e la barra di progressione spariva del
+  // tutto anche se il treno aveva già chiaramente superato diverse
+  // fermate (avevano già un orario reale registrato in quel momento).
+  // Questo criterio usa un dato che abbiamo già per certo su ogni
+  // fermata (l'orario reale, se presente), non più un nome che può
+  // non esistere nell'elenco — corregge il bug alla radice invece di
+  // limitarsi a migliorare l'euristica di confronto testo.
+  let indiceCorrente = -1;
+  fermate.forEach((f, i) => {
+    const isDest = i === fermate.length - 1;
+    // Una fermata intermedia conta come "raggiunta" se il treno vi e'
+    // arrivato, anche se non e' ancora ripartito (altrimenti un treno
+    // fermo a una stazione mostrerebbe come "corrente" quella
+    // precedente, gia' superata). La destinazione finale invece conta
+    // solo con l'arrivo, non ha una partenza successiva da aspettare.
+    const raggiunta = isDest ? f.arrivoReale : (f.partenzaReale || f.arrivoReale);
+    if (raggiunta) indiceCorrente = i;
+  });
 
   const ritardoComplessivo = (typeof json.ritardo === 'number') ? json.ritardo : 0;
 
