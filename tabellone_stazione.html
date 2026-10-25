@@ -10,7 +10,13 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     tabellone_stazione.html — v1.1 (2026-10-25)
+     tabellone_stazione.html — v1.2 (2026-10-25)
+     Novita' v1.2: la riga VT spiega PERCHE' manca il dato invece del
+     generico "VT —": "VT non partito" (treno non ancora partito, nessun
+     ritardo disponibile), "VT fermata n/d" (la fermata di questa stazione
+     non e' stata trovata nel percorso VT), "VT no dati" (ViaggiaTreno non
+     ha risposto o non conosce il treno oggi).
+     v1.1 (2026-10-25)
      Novita' v1.1: accanto allo stato RFI di ogni treno compare anche il
      ritardo ViaggiaTreno (riga "VT ..."), come nella pagina principale.
      Usa il parametro ?codVT=... che dettaglio_treno.html (v1.8+) gia'
@@ -115,13 +121,13 @@
 
   <footer>
     Dati Monitor RFI + ViaggiaTreno (via proxy Deno) · pagina generata dal click su una fermata<br>
-    <span class="footer-rev">tabellone_stazione.html v1.1</span>
+    <span class="footer-rev">tabellone_stazione.html v1.2</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// tabellone_stazione.html — v1.1 (2026-10-25)
+// tabellone_stazione.html — v1.2 (2026-10-25)
 // Vedi commento di versione nel <style> per i dettagli.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
@@ -249,7 +255,7 @@ function trovaFermataVT(json) {
 function descriviRitardoVT(json, arrivals) {
   if (json.subTitle === 'Treno cancellato') return { testo: 'VT cancellato', classe: 'vt-cancellato' };
   const f = trovaFermataVT(json);
-  if (!f) return { testo: 'VT —', classe: '' };
+  if (!f) return { testo: 'VT fermata n/d', classe: '' };
 
   const reale = arrivals ? f.arrivoReale : f.partenzaReale;
   const specifico = arrivals ? f.ritardoArrivo : f.ritardoPartenza;
@@ -259,8 +265,10 @@ function descriviRitardoVT(json, arrivals) {
   } else if (typeof json.ritardo === 'number') {
     min = json.ritardo;
     stima = true;
+  } else if (json.nonPartito === true || /non partito/i.test(json.compRitardo || '')) {
+    return { testo: 'VT non partito', classe: '' };
   } else {
-    return { testo: 'VT —', classe: '' };
+    return { testo: 'VT no dati', classe: '' };
   }
 
   let testo;
@@ -286,12 +294,12 @@ async function arricchisciConViaggiaTreno(lista, arrivals) {
   async function lavoratore() {
     while (indice < numeri.length) {
       const numero = numeri[indice++];
-      let esito = { testo: 'VT —', classe: '' };
+      let esito = { testo: 'VT no dati', classe: '' };
       try {
         const r = await fetch(`${DENO_URL}/treno/${encodeURIComponent(numero)}`);
         const json = await r.json();
         if (!json.errore) esito = descriviRitardoVT(json, arrivals);
-      } catch { /* ViaggiaTreno non risponde: resta "VT —", lo stato RFI non cambia */ }
+      } catch { /* ViaggiaTreno non risponde: resta "VT no dati", lo stato RFI non cambia */ }
       if (mioToken !== tokenVT) return;
       const el = document.getElementById(`vt-${numero}`);
       if (el) { el.textContent = esito.testo; el.className = `treno-vt ${esito.classe}`.trim(); }
