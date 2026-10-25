@@ -10,8 +10,21 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     tabellone_stazione.html — v1.0 (2026-09-10)
-     Pagina standalone: tabellone RFI (partenze/arrivi) per UNA
+     tabellone_stazione.html — v1.1 (2026-10-25)
+     Novita' v1.1: accanto allo stato RFI di ogni treno compare anche il
+     ritardo ViaggiaTreno (riga "VT ..."), come nella pagina principale.
+     Usa il parametro ?codVT=... che dettaglio_treno.html (v1.8+) gia'
+     passa quando la stazione ha un match in stazioni_ridotte.json; per
+     ogni treno della lista legge DENO_URL/treno/{numero} (stesso endpoint
+     di dettaglio_treno.html), trova la fermata di QUESTA stazione (per
+     codice, con fallback sul nome) e ne mostra il ritardo: quello reale
+     registrato alla fermata se il treno c'e' gia' passato, altrimenti il
+     ritardo attuale del treno marcato "stima". Se manca codVT la riga VT
+     non compare e viene mostrata una nota. Le richieste VT partono DOPO
+     il disegno della lista RFI (la lista non aspetta) e sono limitate a
+     4 in parallelo e ai primi 20 treni. Se ViaggiaTreno non risponde,
+     lo stato RFI resta invariato (degrado controllato, nessun errore).
+     v1.0 (2026-09-10): pagina standalone: tabellone RFI (partenze/arrivi) per UNA
      stazione qualsiasi identificata da placeId — non solo le poche
      stazioni configurate come tab in dashboard_live.html. Aperta in
      nuova scheda dal click su una fermata intermedia nella timeline
@@ -68,6 +81,11 @@
   .stato-cancellato { color: var(--red); font-weight: 700; }
   .stato-sconosciuto { color: var(--text-muted); }
 
+  .treno-vt { font-size: 0.64rem; margin-top: 1px; font-family: var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+  .treno-vt.vt-ok { color: var(--green); }
+  .treno-vt.vt-ritardo { color: var(--amber); }
+  .treno-vt.vt-cancellato { color: var(--red); font-weight: 700; }
+  .nota-vt { text-align: center; font-size: 0.7rem; color: var(--text-muted); padding: 8px 0 0; }
   .rfi-link-esterno { display: block; text-align: center; font-size: 0.72rem; color: var(--text-muted); padding: 12px 0 4px; }
   .rfi-link-esterno a { color: var(--text-muted); }
 
@@ -92,17 +110,18 @@
   <div class="treno-list-wrap">
     <div id="treniEl"><div class="loading">Caricamento...</div></div>
   </div>
+  <div class="nota-vt" id="notaVT"></div>
   <div class="rfi-link-esterno" id="rfiLinkEsterno"></div>
 
   <footer>
-    Dati Monitor RFI (via proxy Deno) · pagina generata dal click su una fermata<br>
-    <span class="footer-rev">tabellone_stazione.html v1.0</span>
+    Dati Monitor RFI + ViaggiaTreno (via proxy Deno) · pagina generata dal click su una fermata<br>
+    <span class="footer-rev">tabellone_stazione.html v1.1</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// tabellone_stazione.html — v1.0 (2026-09-10)
+// tabellone_stazione.html — v1.1 (2026-10-25)
 // Vedi commento di versione nel <style> per i dettagli.
 // ================================================================
 const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
@@ -110,6 +129,7 @@ const DENO_URL = 'https://happy-ferret-5445.j0ky0.deno.net';
 const params = new URLSearchParams(window.location.search);
 const placeId = params.get('placeId');
 const nomeStazione = params.get('nome') || 'Stazione';
+const codVT = (params.get('codVT') || '').trim();   // codice ViaggiaTreno della stazione (es. S08409)
 
 let modalitaAttiva = 'partenze';
 
@@ -188,13 +208,96 @@ async function caricaTabellone() {
             <div class="treno-orario">${t.orario || '—'}</div>
             <div class="treno-bin">bin. ${binario}</div>
             ${formattaStatoTreno(t)}
+            ${codVT ? `<div class="treno-vt" id="vt-${t.numeroTreno}">VT …</div>` : ''}
           </div>
         </a>`;
     }).join('');
 
+    arricchisciConViaggiaTreno(lista, arrivals);
+
   } catch (errore) {
     el.innerHTML = `<div class="errore">Errore di connessione: ${errore.message}</div>`;
   }
+}
+
+// ---------------------------------------------------------------
+// v1.1 — arricchimento con ViaggiaTreno
+// ---------------------------------------------------------------
+let tokenVT = 0;   // invalida le risposte VT di un tabellone ormai sostituito (cambio Partenze/Arrivi)
+
+function normalizzaNome(nome) {
+  return (nome || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/['.]/g, '')
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function trovaFermataVT(json) {
+  const fermate = Array.isArray(json.fermate) ? json.fermate : [];
+  const cod = codVT.toUpperCase();
+  let f = fermate.find(x => (x.id || '').toUpperCase() === cod);
+  if (!f && nomeStazione !== 'Stazione') {
+    const n = normalizzaNome(nomeStazione);
+    f = fermate.find(x => normalizzaNome(x.stazione) === n);
+  }
+  return f || null;
+}
+
+function descriviRitardoVT(json, arrivals) {
+  if (json.subTitle === 'Treno cancellato') return { testo: 'VT cancellato', classe: 'vt-cancellato' };
+  const f = trovaFermataVT(json);
+  if (!f) return { testo: 'VT —', classe: '' };
+
+  const reale = arrivals ? f.arrivoReale : f.partenzaReale;
+  const specifico = arrivals ? f.ritardoArrivo : f.ritardoPartenza;
+  let min, stima = false;
+  if (reale && typeof specifico === 'number') {
+    min = specifico;
+  } else if (typeof json.ritardo === 'number') {
+    min = json.ritardo;
+    stima = true;
+  } else {
+    return { testo: 'VT —', classe: '' };
+  }
+
+  let testo;
+  if (min > 0) testo = `VT +${min}'`;
+  else if (min < 0) testo = `VT ${min}'`;
+  else testo = 'VT in orario';
+  if (stima) testo += ' (stima)';
+  return { testo, classe: min > 0 ? 'vt-ritardo' : 'vt-ok' };
+}
+
+async function arricchisciConViaggiaTreno(lista, arrivals) {
+  const nota = document.getElementById('notaVT');
+  if (!codVT) {
+    nota.textContent = 'Ritardo ViaggiaTreno non disponibile: stazione non abbinata (manca codVT nel link).';
+    return;
+  }
+  nota.textContent = '';
+
+  const mioToken = ++tokenVT;
+  const numeri = [...new Set(lista.map(t => t.numeroTreno).filter(Boolean))].slice(0, 20);
+  let indice = 0;
+
+  async function lavoratore() {
+    while (indice < numeri.length) {
+      const numero = numeri[indice++];
+      let esito = { testo: 'VT —', classe: '' };
+      try {
+        const r = await fetch(`${DENO_URL}/treno/${encodeURIComponent(numero)}`);
+        const json = await r.json();
+        if (!json.errore) esito = descriviRitardoVT(json, arrivals);
+      } catch { /* ViaggiaTreno non risponde: resta "VT —", lo stato RFI non cambia */ }
+      if (mioToken !== tokenVT) return;
+      const el = document.getElementById(`vt-${numero}`);
+      if (el) { el.textContent = esito.testo; el.className = `treno-vt ${esito.classe}`.trim(); }
+    }
+  }
+  await Promise.all([lavoratore(), lavoratore(), lavoratore(), lavoratore()]);
 }
 
 renderTogglePA();
