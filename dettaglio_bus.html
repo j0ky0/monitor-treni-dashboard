@@ -10,7 +10,14 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_bus.html — v1.0 (2026-08-15)
+     dettaglio_bus.html — v1.1 (2026-10-25)
+     Novità v1.1: le fermate "abituali" (partenza o arrivo di almeno una
+     tratta configurata in dashboard_live.html) restano evidenziate in
+     teal anche in questa scheda, come nel pannello di tracciamento della
+     live. L'elenco FERMATE_ABITUALI e' COPIATO da TRATTE_BUS di
+     dashboard_live.html (17 stopId): se aggiungi o cambi una tratta li',
+     va aggiornato a mano anche qui — nessun modo automatico senza backend.
+     v1.0 (2026-08-15)
      Pagina standalone: tracciamento di una vettura specifica in
      nuova scheda, gemella di dettaglio_treno.html ma per il modulo
      Bus (tema teal). Si AGGIUNGE al pannello di tracciamento in
@@ -50,6 +57,8 @@
   .tracking-list-wrap { border: 1px solid var(--rule); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
   .tracking-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--rule); gap: 8px; }
   .tracking-row:last-child { border-bottom: none; }
+  .tracking-row.evidenziata { background: rgba(45,212,175,0.08); }
+  .tracking-row.evidenziata .tracking-nome { color: var(--teal); font-weight: 600; }
   .tracking-sx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .tracking-nome { font-size: 0.82rem; color: var(--text); }
   .tracking-seq { font-size: 0.68rem; color: var(--text-muted); font-family: var(--font-mono); }
@@ -76,13 +85,13 @@
 
   <footer>
     Dati ATAC/Roma Mobilita' (via proxy Cloudflare) · pagina generata dal tap sulla card bus<br>
-    <span class="footer-rev">dettaglio_bus.html v1.0</span>
+    <span class="footer-rev">dettaglio_bus.html v1.1</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_bus.html — v1.0 (2026-08-15)
+// dettaglio_bus.html — v1.1 (2026-10-25)
 // ================================================================
 const WORKER_URL = 'https://fragrant-shape-56bd.zargonabio.workers.dev';
 
@@ -91,6 +100,10 @@ const ETICHETTE_OCCUPANCY = {
   4: 'Molto affollato', 5: 'Pieno', 6: 'Non accetta passeggeri',
   7: 'Dato non disponibile', 8: 'Non salibile',
 };
+
+// v1.1: fermate abituali (partenza/arrivo delle tratte di dashboard_live.html),
+// evidenziate in teal. Da tenere allineato a mano con TRATTE_BUS della live.
+const FERMATE_ABITUALI = new Set(['74299', '82007', '82005', '72661', '72685', '84300', '74308', '81874', '84299', '76852', '70441', '70239', '83173', '71555', '73624', '70237', '70446']);
 
 const params = new URLSearchParams(window.location.search);
 const matricola = params.get('matricola');
@@ -146,8 +159,9 @@ async function caricaDettaglioBus() {
     document.getElementById('fermateEl').innerHTML = fermate.map(f => {
       const nome = f.nomeFermata || `Fermata ${f.stopId}`;
       const minutiAttesa = f.arrivalTime ? (f.arrivalTime - ora) / 60 : null;
+      const evidenziata = FERMATE_ABITUALI.has(String(f.stopId));
       return `
-        <div class="tracking-row">
+        <div class="tracking-row ${evidenziata ? 'evidenziata' : ''}">
           <div class="tracking-sx">
             <div class="tracking-nome">${nome}</div>
             <div class="tracking-seq">seq. ${f.stopSequence ?? '—'} · #${f.stopId}</div>
