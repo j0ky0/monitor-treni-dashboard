@@ -10,7 +10,17 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.12 (2026-09-11)
+     dashboard_live.html — v1.13 (2026-10-25)
+     Novità v1.13: stazione di DEFAULT del tabellone treni legata ad
+     Andata/Ritorno. Prima delle 12:00 ("andata", si parte da casa) si
+     apre su ORTE; da mezzogiorno ("ritorno") su TIBURTINA. Usa la stessa
+     regola gia' valida per i bus (direzioneDiDefault(): ora del giorno,
+     piu' l'eventuale scelta manuale di OGGI), quindi le due sezioni
+     restano coerenti. Vale solo all'apertura della pagina: i tab
+     stazione restano toccabili a mano come prima. Il resto del file non
+     cambia (il ritardo VT del tabellone e' solo un delta, senza orari
+     proiettati: la correzione "la partenza non anticipa" era nel
+     dettaglio treno, v1.11).
      Identità: MONITOR LIVE — sfondo neutro comune a entrambe le
      dashboard del progetto, ma con doppio accento di modulo:
        --amber = modulo Treni (RFI + ViaggiaTreno)
@@ -391,14 +401,15 @@
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
     Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
-    <span style="opacity:0.6">dashboard_live.html v1.12</span>
+    <span style="opacity:0.6">dashboard_live.html v1.13</span>
   </footer>
 
 </div>
 
 <script>
 // ================================================================
-// dashboard_live.html — v1.12 (2026-09-11)
+// dashboard_live.html — v1.13 (2026-10-25)
+// Novità v1.13: stazione di default del tabellone treni = Orte prima delle 12, Tiburtina dopo.
 // Novità v1.12: TRENI_PREFERITI_FISSI (7 treni, sempre nel pannello
 // preferiti). Vedi CHANGELOG.md.
 // ================================================================
@@ -609,7 +620,10 @@ const STAZIONI_TRENI = [
   { nome: 'Fiumicino', placeId: 1327, codViaggiaTreno: 'S08411' },
 ];
 
-let stazioneAttiva = STAZIONI_TRENI[1];
+// v1.13: default Orte la mattina (andata), Tiburtina da mezzogiorno (ritorno).
+// Fallback su Tiburtina se per qualunque motivo il nome non si trova.
+let stazioneAttiva = STAZIONI_TRENI.find(s => s.nome === (direzioneDiDefault() === 'andata' ? 'Orte' : 'Tiburtina'))
+  || STAZIONI_TRENI[1];
 let modalitaAttiva = 'partenze';
 let vistaClassicaAperta = false;
 
