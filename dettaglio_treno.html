@@ -10,7 +10,13 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dettaglio_treno.html — v1.11 (2026-10-25)
+     dettaglio_treno.html — v1.12 (2026-10-27)
+     Novità v1.12: FIX anche per l'ARRIVO. Gli orari PROIETTATI (fermate
+     non ancora raggiunte) non scendono mai sotto l'orario programmato,
+     ne' in arrivo ne' in partenza: con un treno in anticipo si mostra
+     "in orario" e l'orario teorico, non un arrivo anticipato che il
+     viaggiatore non puo' sfruttare. Gli orari REALI gia' registrati
+     (treno passato) restano quelli veri, anticipo compreso.
      Novità v1.11: FIX partenza proiettata in anticipo. Se il treno ha un
      ritardo complessivo NEGATIVO (e' in anticipo), l'ARRIVO proiettato
      resta anticipato (un treno puo' arrivare prima), ma la PARTENZA
@@ -236,13 +242,14 @@
 
   <footer>
     Dati ViaggiaTreno (via proxy Deno) · pagina generata dal click sul Monitor RFI<br>
-    <span class="footer-rev">dettaglio_treno.html v1.10</span>
+    <span class="footer-rev">dettaglio_treno.html v1.12</span>
   </footer>
 </div>
 
 <script>
 // ================================================================
-// dettaglio_treno.html — v1.10 (2026-09-23)
+// dettaglio_treno.html — v1.12 (2026-10-27)
+// v1.12: le proiezioni (fermate future) non scendono mai sotto l'orario programmato.
 // Novità v1.10: FIX barra progressione basata su orari reali per-fermata
 // invece del nome GPS (poteva essere un punto infrastrutturale). Vedi
 // commento di versione nel <style> per il changelog completo.
@@ -547,8 +554,8 @@ function blocccoOrarioTimeline(etichetta, teoricoMs, realeMs, ritardoComplessivo
     classe = 'confermato';
     ritardoMostrato = (typeof ritardoSpecifico === 'number') ? ritardoSpecifico : null;
   } else if (teoricoMs) {
-    // v1.11: la partenza non anticipa mai l'orario programmato
-    const ritardoProiettato = (etichetta === 'Partenza') ? Math.max(0, ritardoComplessivo) : ritardoComplessivo;
+    // v1.12: nessuna proiezione sotto l'orario programmato (ne' arrivo ne' partenza)
+    const ritardoProiettato = Math.max(0, ritardoComplessivo);
     const proiettatoMs = teoricoMs + (ritardoProiettato * 60000);
     valoreTxt = formattaOrario(proiettatoMs);
     classe = ritardoProiettato > 0 ? 'proiettato in-ritardo' : 'proiettato';
