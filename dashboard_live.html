@@ -10,7 +10,20 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.13 (2026-10-25)
+     dashboard_live.html — v1.14 (2026-10-31)
+     Novità v1.14: UNA SOLA PAGINA con tre viste, scelte dal parametro
+     ?vista= nel link: nessun parametro = vista completa (bus + treni);
+     ?vista=treni = solo treni; ?vista=bus = solo bus. Nella vista solo
+     treni compare il tasto Andata/Ritorno (prima c'era solo nel modulo
+     bus). Il tasto Andata/Ritorno (bus o treni) sposta ora anche la
+     stazione del tabellone treni: Andata = Orte, Ritorno = Tiburtina.
+     Il modulo nascosto non fa nessuna chiamata di rete. Titolo e icona
+     della scheda cambiano con la vista (utile per le scorciatoie sul
+     telefono). dashboard_treni.html e dashboard_bus.html diventano
+     semplici rimandi alla vista corrispondente, cosi' i vecchi link e le
+     scorciatoie gia' create continuano a funzionare; non esistono piu'
+     tre copie del codice da tenere allineate a mano.
+     v1.13 (2026-10-25)
      Novità v1.13: stazione di DEFAULT del tabellone treni legata ad
      Andata/Ritorno. Prima delle 12:00 ("andata", si parte da casa) si
      apre su ORTE; da mezzogiorno ("ritorno") su TIBURTINA. Usa la stessa
@@ -175,6 +188,11 @@
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   .ora-sub { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; font-family: var(--font-mono); }
   .nav-pagine { font-size: 0.68rem; margin-top: 4px; display: flex; gap: 10px; }
+  body.vista-bus #modPreferiti, body.vista-bus #modTreni { display: none; }
+  body.vista-treni #modBus { display: none; }
+  #direzioneTreniRow { display: none; }
+  body.vista-treni #direzioneTreniRow { display: flex; }
+  .nav-pagine a.on { color: var(--text); text-decoration-style: solid; }
   .nav-pagine a { color: var(--text-muted); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
   .btn-refresh { background: var(--amber); border: none; border-radius: 8px; padding: 0.65rem 1.1rem; font-size: 0.88rem; font-weight: 700; color: #14171c; cursor: pointer; font-family: var(--font-sans); box-shadow: 0 2px 8px rgba(240,180,41,0.25); }
   .btn-refresh:active { background: var(--amber-dim); transform: scale(0.97); }
@@ -329,7 +347,7 @@
     <div>
       <div class="titolo"><span class="dot"></span>MONITOR LIVE</div>
       <div class="ora-sub" id="oraEl">--:--</div>
-      <div class="nav-pagine"><a href="dashboard_treni.html" target="_blank" rel="noopener">solo treni ↗</a><a href="dashboard_bus.html" target="_blank" rel="noopener">solo bus ↗</a></div>
+      <div class="nav-pagine" id="navPagine"><a href="?vista=tutto" data-vista="tutto">completa</a><a href="?vista=treni" data-vista="treni">solo treni</a><a href="?vista=bus" data-vista="bus">solo bus</a></div>
     </div>
     <div>
       <button class="btn-refresh" onclick="aggiornaTutto()">↻ Aggiorna</button>
@@ -337,8 +355,12 @@
     </div>
   </header>
 
+  <div id="modPreferiti">
   <div class="section-label mod-treni" id="sectionPreferiti" style="display:none;">⭐ Treni preferiti</div>
   <div id="preferitiWrap"></div>
+  </div>
+
+  <div id="modBus">
 
   <div class="section-label mod-bus">🚌 Bus in tempo reale</div>
 
@@ -377,9 +399,16 @@
     </div>
   </div>
 
+  </div><!-- /modBus -->
+
+  <div id="modTreni">
   <div class="section-label mod-treni section-label-row">
     <span>🚆 Treni — RFI + ViaggiaTreno</span>
     <a href="javascript:void(0)" class="link-vista-alt" onclick="toggleVistaClassica()" id="btnVistaClassica">tabellone ViaggiaTreno (foto meno recente) ▾</a>
+  </div>
+  <div class="toggle-pa" id="direzioneTreniRow">
+    <button id="btnTreniAndata" onclick="selDirezione('andata')">Andata · Orte</button>
+    <button id="btnTreniRitorno" onclick="selDirezione('ritorno')">Ritorno · Tiburtina</button>
   </div>
   <div class="tabs" id="stazioniTabs"></div>
   <div class="toggle-pa" id="togglePA">
@@ -398,17 +427,33 @@
     </div>
   </div>
 
+  </div><!-- /modTreni -->
+
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
     Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
-    <span style="opacity:0.6">dashboard_live.html v1.13</span>
+    <span style="opacity:0.6">dashboard_live.html v1.14</span>
   </footer>
 
 </div>
 
 <script>
+// v1.14: vista scelta dal link (?vista=tutto|treni|bus)
+const VISTA_RICHIESTA = (new URLSearchParams(location.search).get('vista') || 'tutto').toLowerCase();
+const VISTA = ['treni', 'bus'].includes(VISTA_RICHIESTA) ? VISTA_RICHIESTA : 'tutto';
+const MOSTRA_BUS = VISTA !== 'treni';
+const MOSTRA_TRENI = VISTA !== 'bus';
+document.body.classList.add('vista-' + VISTA);
+document.title = { treni: 'Treni — Monitor Live', bus: 'Bus — Monitor Live', tutto: 'Monitor Live — Pendolare' }[VISTA];
+(function () {
+  const emoji = { treni: '🚆', bus: '🚌', tutto: '🚉' }[VISTA];
+  const icona = document.querySelector('link[rel="icon"]');
+  if (icona) icona.href = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>' + emoji + '</text></svg>';
+  document.querySelectorAll('#navPagine a').forEach(a => a.classList.toggle('on', a.dataset.vista === VISTA));
+})();
+
 // ================================================================
-// dashboard_live.html — v1.13 (2026-10-25)
+// dashboard_live.html — v1.14 (2026-10-31)
 // Novità v1.13: stazione di default del tabellone treni = Orte prima delle 12, Tiburtina dopo.
 // Novità v1.12: TRENI_PREFERITI_FISSI (7 treni, sempre nel pannello
 // preferiti). Vedi CHANGELOG.md.
@@ -584,9 +629,20 @@ function selDirezione(direzione) {
     const oggi = new Date().toISOString().slice(0, 10);
     localStorage.setItem('monitorLive.direzioneOverride', JSON.stringify({ direzione, data: oggi }));
   } catch {}
-  renderFiltriBus();
-  renderFermataChips();
-  caricaBus();
+  if (MOSTRA_BUS) {
+    renderFiltriBus();
+    renderFermataChips();
+    caricaBus();
+  }
+  if (MOSTRA_TRENI) {
+    renderDirezioneTreni();
+    selStazione(stazionePerDirezione(direzione).codViaggiaTreno);
+  }
+}
+
+function renderDirezioneTreni() {
+  document.getElementById('btnTreniAndata').classList.toggle('on', direzioneAttiva === 'andata');
+  document.getElementById('btnTreniRitorno').classList.toggle('on', direzioneAttiva === 'ritorno');
 }
 
 function selGruppo(gruppo) {
@@ -622,8 +678,10 @@ const STAZIONI_TRENI = [
 
 // v1.13: default Orte la mattina (andata), Tiburtina da mezzogiorno (ritorno).
 // Fallback su Tiburtina se per qualunque motivo il nome non si trova.
-let stazioneAttiva = STAZIONI_TRENI.find(s => s.nome === (direzioneDiDefault() === 'andata' ? 'Orte' : 'Tiburtina'))
-  || STAZIONI_TRENI[1];
+function stazionePerDirezione(direzione) {
+  return STAZIONI_TRENI.find(s => s.nome === (direzione === 'andata' ? 'Orte' : 'Tiburtina')) || STAZIONI_TRENI[1];
+}
+let stazioneAttiva = stazionePerDirezione(direzioneDiDefault());
 let modalitaAttiva = 'partenze';
 let vistaClassicaAperta = false;
 
@@ -1281,13 +1339,17 @@ function selModalita(modalita) {
 // ================================================================
 function aggiornaTutto() {
   aggiornaOra();
-  if (vetturaTracciata) {
-    caricaVettura();
-  } else {
-    caricaBus();
+  if (MOSTRA_BUS) {
+    if (vetturaTracciata) {
+      caricaVettura();
+    } else {
+      caricaBus();
+    }
   }
-  caricaTreniRFI();
-  caricaPreferitiPannello();
+  if (MOSTRA_TRENI) {
+    caricaTreniRFI();
+    caricaPreferitiPannello();
+  }
 
   // Nessun refresh automatico in pagina (solo l'orologio si aggiorna
   // da solo): questo timestamp rende visibile quanto sono "vecchi" i
@@ -1298,29 +1360,38 @@ function aggiornaTutto() {
 }
 
 aggiornaOra();
-renderFiltriBus();
-renderTabsStazioni();
-renderTogglePA();
-aggiornaLinkRfi();
+if (MOSTRA_BUS) renderFiltriBus();
+if (MOSTRA_TRENI) {
+  renderTabsStazioni();
+  renderTogglePA();
+  aggiornaLinkRfi();
+  renderDirezioneTreni();
+}
 
 // Ripristino stato salvato (fermata pinnata + eventuale tracciamento
 // vettura in corso + treni preferiti) prima del primo caricamento,
 // cosi' la pagina riapre esattamente dove l'avevi lasciata.
-caricaFermataPinnataDaStorage();
-renderFermataChips();
-renderFermataPin();
-
-caricaPreferitiSalvati();
-caricaPreferitiPannello();
-
-const matricolaSalvata = caricaVetturaTracciataDaStorage();
-if (matricolaSalvata) {
-  avviaTracciamento(matricolaSalvata);
-} else {
-  caricaBus();
+if (MOSTRA_BUS) {
+  caricaFermataPinnataDaStorage();
+  renderFermataChips();
+  renderFermataPin();
 }
 
-caricaTreniRFI();
+if (MOSTRA_TRENI) {
+  caricaPreferitiSalvati();
+  caricaPreferitiPannello();
+}
+
+if (MOSTRA_BUS) {
+  const matricolaSalvata = caricaVetturaTracciataDaStorage();
+  if (matricolaSalvata) {
+    avviaTracciamento(matricolaSalvata);
+  } else {
+    caricaBus();
+  }
+}
+
+if (MOSTRA_TRENI) caricaTreniRFI();
 
 const oraIniziale = new Date();
 document.getElementById('ultimoAggEl').textContent =
