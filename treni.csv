@@ -1,0 +1,79 @@
+numero_treno,codice_stazione,stazione_partenza,note,origine_attesa
+4523,S08300,Viterbo Porta Fiorentina
+20423,S08400,Orte
+4097,S06011,Chiusi-Chianciano Terme
+4256,S08400,Orte
+4719,S08400,Orte,,S07004;S07005
+20493,S08400,Orte
+20703,S08413,Fiumicino Aeroporto
+4158,S08400,Orte
+20711,S08413,Fiumicino Aeroporto
+20717,S08413,Fiumicino Aeroporto
+20721,S08413,Fiumicino Aeroporto
+20547,S08400,Orte
+294,S00000,da_definire
+531,S00000,da_definire
+540,S00000,da_definire
+598,S00000,da_definire
+4095,S00000,da_definire
+4105,S00000,da_definire
+4106,S00000,da_definire
+4107,S00000,da_definire
+4110,S00000,da_definire
+4150,S00000,da_definire
+4151,S00000,da_definire
+4155,S00000,da_definire
+4156,S00000,da_definire
+4196,S00000,da_definire
+4520,S00000,da_definire
+4521,S00000,da_definire
+4530,S00000,da_definire
+4534,S00000,da_definire
+4539,S00000,da_definire
+4721,S00000,da_definire,"dal 12/10/2026 sostituito dal 93621 (avviso Trenitalia, lavori 12/10-12/12/2026); tenere finche' non si sa cosa succede dopo il 12/12",S07004;S07005
+93621,S00000,da_definire,dal 12/10/2026 al posto del 4721 Perugia 05:47 - Roma Termini 08:57 (avviso Trenitalia),S07004;S07005
+4731,S00000,da_definire,,S07004;S07005
+4732,S00000,da_definire,,S08409
+4733,S00000,da_definire,,S07004;S07005
+93639,S00000,da_definire,"dal 12/10/2026 al posto del 4733 Perugia 15:50 - Roma Termini 18:48 (avviso Trenitalia, lavori 12/10-12/12/2026); 4733 e' anche un numero di un treno Trenord a Milano",S07004;S07005
+4734,S00000,da_definire,"dal 12/10/2026 orari modificati: Roma Termini 19:02 - Perugia 21:43 (avviso Trenitalia, lavori 12/10-12/12/2026); stesso numero",S08409
+4736,S00000,da_definire,,S08409
+8528,S00000,da_definire
+8966,S00000,da_definire,probabile treno Italo (come i 99xx); il numero coincide con un Brescia-Iseo Trenord registrato a luglio-agosto: non confonderli
+8968,S00000,da_definire,probabile treno Italo: non tracciabile con ViaggiaTreno; da trovare un modo di tracciarlo (anche se meno affidabile di Trenitalia)
+9326,S00000,da_definire
+9328,S00000,da_definire
+9432,S00000,da_definire
+9434,S00000,da_definire
+9508,S00000,da_definire
+9556,S00000,da_definire
+9560,S00000,da_definire
+9660,S00000,da_definire
+9662,S00000,da_definire
+9944,S00000,da_definire,probabile treno Italo: non tracciabile con ViaggiaTreno; da trovare un modo di tracciarlo (anche se meno affidabile di Trenitalia)
+9954,S00000,da_definire,probabile treno Italo: non tracciabile con ViaggiaTreno; da trovare un modo di tracciarlo (anche se meno affidabile di Trenitalia)
+9992,S00000,da_definire,probabile treno Italo: non tracciabile con ViaggiaTreno; da trovare un modo di tracciarlo (anche se meno affidabile di Trenitalia)
+9994,S00000,da_definire,probabile treno Italo: non tracciabile con ViaggiaTreno; da trovare un modo di tracciarlo (anche se meno affidabile di Trenitalia)
+20395,S00000,da_definire
+20397,S00000,da_definire
+20405,S00000,da_definire
+20411,S00000,da_definire
+20439,S00000,da_definire
+20485,S00000,da_definire
+20491,S00000,da_definire
+20497,S00000,da_definire
+20503,S00000,da_definire
+20509,S00000,da_definire
+20517,S00000,da_definire
+20523,S00000,da_definire
+20529,S00000,da_definire
+20539,S00000,da_definire
+20665,S00000,da_definire
+20675,S00000,da_definire
+20677,S00000,da_definire
+20683,S00000,da_definire
+20687,S00000,da_definire
+20693,S00000,da_definire
+20731,S00000,da_definire
+21379,S00000,da_definire
+23290,S00000,da_definire,"verificato 31/10/2026: oggi il numero risulta su una linea non di interesse; teniamolo (ultimo giorno registrato 28/08, Roma Ostiense 17:49 - Viterbo P.F. 19:50). origine_attesa = Roma Ostiense per non registrare l'altro treno",S08406

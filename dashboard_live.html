@@ -10,7 +10,17 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
-     dashboard_live.html — v1.14 (2026-10-31)
+     dashboard_live.html — v1.15 (2026-10-31)
+     Novità v1.15: (1) il tabellone ViaggiaTreno ("vista classica") ha ora
+     le righe cliccabili come quello RFI: aprono il dettaglio treno in
+     nuova scheda. Prima non erano link, e quando il Monitor RFI e' giu'
+     (HTTP 502) non c'era modo di aprire un treno. (2) Andata/Ritorno dei
+     TRENI e' ora SEPARATO da quello dei bus: ogni modulo ha il suo tasto
+     e il suo stato (oggi: chiave propria nel browser) e il tasto dei bus
+     non sposta piu' la stazione del tabellone. Il tasto dei treni, che
+     sposta Orte/Tiburtina, compare sia nella vista completa sia in quella
+     solo treni.
+     v1.14 (2026-10-31)
      Novità v1.14: UNA SOLA PAGINA con tre viste, scelte dal parametro
      ?vista= nel link: nessun parametro = vista completa (bus + treni);
      ?vista=treni = solo treni; ?vista=bus = solo bus. Nella vista solo
@@ -190,8 +200,6 @@
   .nav-pagine { font-size: 0.68rem; margin-top: 4px; display: flex; gap: 10px; }
   body.vista-bus #modPreferiti, body.vista-bus #modTreni { display: none; }
   body.vista-treni #modBus { display: none; }
-  #direzioneTreniRow { display: none; }
-  body.vista-treni #direzioneTreniRow { display: flex; }
   .nav-pagine a.on { color: var(--text); text-decoration-style: solid; }
   .nav-pagine a { color: var(--text-muted); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
   .btn-refresh { background: var(--amber); border: none; border-radius: 8px; padding: 0.65rem 1.1rem; font-size: 0.88rem; font-weight: 700; color: #14171c; cursor: pointer; font-family: var(--font-sans); box-shadow: 0 2px 8px rgba(240,180,41,0.25); }
@@ -407,8 +415,8 @@
     <a href="javascript:void(0)" class="link-vista-alt" onclick="toggleVistaClassica()" id="btnVistaClassica">tabellone ViaggiaTreno (foto meno recente) ▾</a>
   </div>
   <div class="toggle-pa" id="direzioneTreniRow">
-    <button id="btnTreniAndata" onclick="selDirezione('andata')">Andata · Orte</button>
-    <button id="btnTreniRitorno" onclick="selDirezione('ritorno')">Ritorno · Tiburtina</button>
+    <button id="btnTreniAndata" onclick="selDirezioneTreni('andata')">Andata · Orte</button>
+    <button id="btnTreniRitorno" onclick="selDirezioneTreni('ritorno')">Ritorno · Tiburtina</button>
   </div>
   <div class="tabs" id="stazioniTabs"></div>
   <div class="toggle-pa" id="togglePA">
@@ -432,7 +440,7 @@
   <footer>
     Bus: dati ATAC/Roma Mobilita' in tempo reale (via proxy Cloudflare)<br>
     Treni: dati Monitor RFI (via proxy Deno) · dettaglio treno da ViaggiaTreno · aggiornamento automatico<br>
-    <span style="opacity:0.6">dashboard_live.html v1.14</span>
+    <span style="opacity:0.6">dashboard_live.html v1.15</span>
   </footer>
 
 </div>
@@ -453,8 +461,9 @@ document.title = { treni: 'Treni — Monitor Live', bus: 'Bus — Monitor Live',
 })();
 
 // ================================================================
-// dashboard_live.html — v1.14 (2026-10-31)
+// dashboard_live.html — v1.15 (2026-10-31)
 // Novità v1.13: stazione di default del tabellone treni = Orte prima delle 12, Tiburtina dopo.
+// Novità v1.15: righe del tabellone ViaggiaTreno cliccabili; Andata/Ritorno dei treni separato da quello dei bus.
 // Novità v1.12: TRENI_PREFERITI_FISSI (7 treni, sempre nel pannello
 // preferiti). Vedi CHANGELOG.md.
 // ================================================================
@@ -629,20 +638,40 @@ function selDirezione(direzione) {
     const oggi = new Date().toISOString().slice(0, 10);
     localStorage.setItem('monitorLive.direzioneOverride', JSON.stringify({ direzione, data: oggi }));
   } catch {}
-  if (MOSTRA_BUS) {
-    renderFiltriBus();
-    renderFermataChips();
-    caricaBus();
-  }
-  if (MOSTRA_TRENI) {
-    renderDirezioneTreni();
-    selStazione(stazionePerDirezione(direzione).codViaggiaTreno);
-  }
+  renderFiltriBus();
+  renderFermataChips();
+  caricaBus();
+}
+
+// v1.15: direzione dei TRENI, separata da quella dei bus. Stessa regola
+// (prima delle 12 = andata, poi ritorno, con override valido solo oggi)
+// ma chiave propria nel browser.
+function direzioneTreniDiDefault() {
+  try {
+    const grezzo = localStorage.getItem('monitorLive.direzioneTreniOverride');
+    if (grezzo) {
+      const { direzione, data } = JSON.parse(grezzo);
+      const oggi = new Date().toISOString().slice(0, 10);
+      if (data === oggi) return direzione;
+    }
+  } catch {}
+  return new Date().getHours() < 12 ? 'andata' : 'ritorno';
+}
+let direzioneTreni = direzioneTreniDiDefault();
+
+function selDirezioneTreni(direzione) {
+  direzioneTreni = direzione;
+  try {
+    const oggi = new Date().toISOString().slice(0, 10);
+    localStorage.setItem('monitorLive.direzioneTreniOverride', JSON.stringify({ direzione, data: oggi }));
+  } catch {}
+  renderDirezioneTreni();
+  selStazione(stazionePerDirezione(direzione).codViaggiaTreno);
 }
 
 function renderDirezioneTreni() {
-  document.getElementById('btnTreniAndata').classList.toggle('on', direzioneAttiva === 'andata');
-  document.getElementById('btnTreniRitorno').classList.toggle('on', direzioneAttiva === 'ritorno');
+  document.getElementById('btnTreniAndata').classList.toggle('on', direzioneTreni === 'andata');
+  document.getElementById('btnTreniRitorno').classList.toggle('on', direzioneTreni === 'ritorno');
 }
 
 function selGruppo(gruppo) {
@@ -681,7 +710,7 @@ const STAZIONI_TRENI = [
 function stazionePerDirezione(direzione) {
   return STAZIONI_TRENI.find(s => s.nome === (direzione === 'andata' ? 'Orte' : 'Tiburtina')) || STAZIONI_TRENI[1];
 }
-let stazioneAttiva = stazionePerDirezione(direzioneDiDefault());
+let stazioneAttiva = stazionePerDirezione(direzioneTreniDiDefault());
 let modalitaAttiva = 'partenze';
 let vistaClassicaAperta = false;
 
@@ -1298,7 +1327,7 @@ async function renderVistaClassica() {
     const destOrig = modalitaAttiva === 'partenze' ? t.destinazione : t.origine;
     const binario = t.binarioEffettivo || t.binarioProgrammato || '—';
     return `
-      <div class="treno-row">
+      <a class="treno-row" href="dettaglio_treno.html?numero=${t.numeroTreno}" target="_blank" rel="noopener">
         <div class="treno-sx">
           <div class="treno-num-riga">
             <span class="treno-num">${t.numeroTreno}</span>
@@ -1310,7 +1339,7 @@ async function renderVistaClassica() {
           <div class="treno-orario">${t.orarioProgrammato || '—'} ${formattaRitardoTreno(t.ritardo)}</div>
           <div class="treno-bin">bin. ${binario}</div>
         </div>
-      </div>`;
+      </a>`;
   }).join('');
 }
 
